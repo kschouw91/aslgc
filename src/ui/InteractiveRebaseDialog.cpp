@@ -4,6 +4,7 @@
 #include "Theme.h"
 
 #include <QCheckBox>
+#include <QCoreApplication>
 #include <QDialogButtonBox>
 #include <QFontDatabase>
 #include <QHBoxLayout>

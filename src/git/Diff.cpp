@@ -82,11 +82,14 @@ QVector<FileDiff> parseDiff(const QByteArray& data) {
         }
         if (!hunk) {
             cur->header.push_back(l);
-            if (l.startsWith("--- "))
+            // Older `git log -L` output has no "new/deleted file mode" lines, only /dev/null.
+            if (l.startsWith("--- ")) {
                 cur->oldPath = pathFromHeader(l.mid(4));
-            else if (l.startsWith("+++ "))
+                if (l == "--- /dev/null") cur->newFile = true;
+            } else if (l.startsWith("+++ ")) {
                 cur->newPath = pathFromHeader(l.mid(4));
-            else if (l.startsWith("new file mode"))
+                if (l == "+++ /dev/null") cur->deletedFile = true;
+            } else if (l.startsWith("new file mode"))
                 cur->newFile = true;
             else if (l.startsWith("deleted file mode"))
                 cur->deletedFile = true;
