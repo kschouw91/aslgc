@@ -1,0 +1,44 @@
+.\" SPDX-License-Identifier: MIT
+.TH ASLGC 1 "November 2026" "aslgc 0.1.0" "User Commands"
+.SH NAME
+aslgc \- a simple Linux Git client
+.SH SYNOPSIS
+.B aslgc
+[\fIOPTION\fR]... [\fIPATH\fR]...
+.SH DESCRIPTION
+.B aslgc
+is a graphical Git client. It shows repositories in tabs with a commit graph,
+lets you stage whole files, hunks or single lines, and runs branch, merge,
+rebase, stash, fetch, pull and push operations. All operations are carried out
+by the
+.BR git (1)
+command line, so hooks, signing and configuration apply as usual.
+.PP
+Each
+.I PATH
+is opened as a repository tab. Without arguments the tabs of the previous
+session are restored.
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Show a summary of the options and exit.
+.TP
+.BR \-v ", " \-\-version
+Show the version and exit.
+.SH ENVIRONMENT
+.TP
+.B ASLGC_GIT
+Path of the git executable to use instead of the one found on
+.BR PATH .
+.TP
+.B ASLGC_GITHUB_CLIENT_ID
+Client ID of a GitHub OAuth App used for browser sign-in, overriding the value
+chosen at build time.
+.SH FILES
+.TP
+.I ~/.config/aslgc/aslgc.conf
+Settings: open tabs, recent repositories, window layout and the list of
+signed-in accounts. Account tokens are kept in the system keyring
+(Secret Service or KWallet), not in this file.
+.SH SEE ALSO
+.BR git (1)

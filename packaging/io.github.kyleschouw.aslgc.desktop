@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=aslgc
+GenericName=Git Client
+Comment=A simple Linux Git client
+Exec=aslgc %F
+Icon=io.github.kyleschouw.aslgc
+Terminal=false
+Categories=Development;RevisionControl;Qt;
+Keywords=git;version control;vcs;commit;branch;merge;rebase;github;gitlab;
+StartupWMClass=aslgc

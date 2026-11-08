@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+BasedOnStyle: Google
+Language: Cpp
+Standard: c++20
+IndentWidth: 4
+ColumnLimit: 130
+AccessModifierOffset: -4
+PointerAlignment: Left
+DerivePointerAlignment: false
+IncludeBlocks: Preserve
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortLambdasOnASingleLine: All
+SpacesBeforeTrailingComments: 2
+FixNamespaceComments: true

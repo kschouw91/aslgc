@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: MIT
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Arch Linux
+            image: archlinux:latest
+            deps: >-
+              pacman -Syu --noconfirm --needed
+              base-devel cmake ninja git qt6-base qt6-svg qtkeychain-qt6 qt6-tools
+          - name: Fedora
+            image: fedora:latest
+            deps: >-
+              dnf install -y
+              gcc-c++ cmake ninja-build git qt6-qtbase-devel qt6-qtsvg-devel qtkeychain-qt6-devel qt6-qttools-devel
+          - name: Debian 13
+            image: debian:trixie
+            deps: >-
+              apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+              build-essential cmake ninja-build git ca-certificates libgl-dev
+              qt6-base-dev qt6-svg-dev qtkeychain-qt6-dev qt6-tools-dev qt6-l10n-tools
+          - name: Ubuntu 24.04 (Qt 6.4)
+            image: ubuntu:24.04
+            deps: >-
+              apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+              build-essential cmake ninja-build git ca-certificates libgl-dev
+              qt6-base-dev qt6-svg-dev qtkeychain-qt6-dev qt6-tools-dev qt6-l10n-tools
+    steps:
+      - name: Install dependencies
+        run: ${{ matrix.deps }}
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: UI smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+          XDG_CONFIG_HOME: /tmp/aslgc-config
+          XDG_STATE_HOME: /tmp/aslgc-state
+        run: |
+          git config --global --add safe.directory "$PWD"
+          for view in history changes; do
+            ASLGC_SCREENSHOT="$PWD/screenshot-$view.png" ASLGC_VIEW=$view timeout 60 ./build/aslgc "$PWD"
+            test -s "screenshot-$view.png"
+          done
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ strategy.job-index }}
+          path: screenshot-*.png
+      - name: Install
+        run: |
+          DESTDIR="$PWD/stage" cmake --install build --prefix /usr
+          find stage -type f | sort

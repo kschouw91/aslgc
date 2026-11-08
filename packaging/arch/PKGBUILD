@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: MIT
+# Development package that builds the latest commit from GitHub.
+# Build with: cd packaging/arch && makepkg -si
+pkgname=aslgc-git
+_pkgname=aslgc
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="A simple Linux Git client"
+arch=('x86_64' 'aarch64')
+url="https://github.com/kyleschouw/aslgc"
+license=('MIT')
+depends=('git' 'qt6-base' 'qt6-svg' 'qtkeychain-qt6' 'hicolor-icon-theme')
+makedepends=('cmake' 'qt6-tools')
+optdepends=('gnome-keyring: store GitHub / GitLab account tokens'
+            'kwallet: store GitHub / GitLab account tokens')
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+source=("git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$_pkgname"
+    if git describe --tags >/dev/null 2>&1; then
+        git describe --long --tags --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
+    else
+        printf "0.1.0.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+    fi
+}
+
+build() {
+    cmake -S "$_pkgname" -B build \
+        -DCMAKE_BUILD_TYPE=None \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_INSTALL_LIBEXECDIR=lib \
+        -Wno-dev
+    cmake --build build
+}
+
+check() {
+    ctest --test-dir build --output-on-failure
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+    install -Dm644 "$_pkgname/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
