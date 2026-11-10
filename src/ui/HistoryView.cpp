@@ -2,6 +2,7 @@
 #include "HistoryView.h"
 
 #include "Async.h"
+#include "Dialogs.h"
 #include "DiffView.h"
 #include "FileList.h"
 #include "RepoView.h"
@@ -9,6 +10,9 @@
 
 #include <QClipboard>
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileDialog>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -22,6 +26,8 @@
 #include <QTextBrowser>
 #include <QTreeView>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 namespace aslgc {
 
@@ -54,7 +60,7 @@ HistoryView::HistoryView(RepoView* owner) : QWidget(owner), m_owner(owner) {
     m_list->setItemsExpandable(false);
     m_list->setAllColumnsShowFocus(true);
     m_list->setIndentation(0);
-    m_list->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_list->setSelectionMode(QAbstractItemView::ExtendedSelection);  // two or more selected: a comparison
     m_list->setContextMenuPolicy(Qt::CustomContextMenu);
     m_list->setFrameShape(QFrame::NoFrame);
     m_list->header()->setStretchLastSection(false);
@@ -100,10 +106,15 @@ HistoryView::HistoryView(RepoView* owner) : QWidget(owner), m_owner(owner) {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_vertical);
 
-    connect(m_list->selectionModel(), &QItemSelectionModel::currentRowChanged, this, &HistoryView::onCurrentRowChanged);
+    connect(m_list->selectionModel(), &QItemSelectionModel::selectionChanged, this, &HistoryView::onSelectionChanged);
     connect(m_list, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
         const QModelIndex idx = m_list->indexAt(pos);
         if (!idx.isValid()) return;
+        const QStringList selected = selectedShas();
+        if (selected.size() >= 2 && selected.contains(m_model->commit(idx.row()).sha)) {
+            showSelectionMenu(selected, m_list->viewport()->mapToGlobal(pos));
+            return;
+        }
         m_list->setCurrentIndex(idx);
         m_owner->showCommitMenu(m_model->commit(idx.row()).sha, m_list->viewport()->mapToGlobal(pos));
     });
@@ -111,9 +122,19 @@ HistoryView::HistoryView(RepoView* owner) : QWidget(owner), m_owner(owner) {
             [this] { findNext(QGuiApplication::keyboardModifiers() & Qt::ShiftModifier); });
     connect(m_search, &QLineEdit::textChanged, this, [this] { m_searchStatus->clear(); });
     connect(m_header, &QTextBrowser::anchorClicked, this, [this](const QUrl& url) {
-        if (url.scheme() == QLatin1String("commit")) selectCommit(url.path());
+        if (url.scheme() == QLatin1String("commit")) {
+            selectCommit(url.path());
+        } else if (url.scheme() == QLatin1String("compare") && m_compare) {
+            if (url.path() == QLatin1String("save")) {
+                saveComparisonPatch();
+            } else {
+                Comparison c = *m_compare;
+                c.includeOldest = url.path() == QLatin1String("include");
+                showComparison(c);
+            }
+        }
     });
-    connect(m_files, &QListWidget::currentItemChanged, this, &HistoryView::loadFileDiff);
+    connect(m_files, &QListWidget::currentItemChanged, this, [this] { loadFileDiff(); });
     m_files->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_files, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
         const FileChange* f = m_files->currentFile();
@@ -129,9 +150,9 @@ HistoryView::HistoryView(RepoView* owner) : QWidget(owner), m_owner(owner) {
     m_diff->setLineHistoryEnabled(true);
     connect(m_diff, &DiffView::lineHistoryRequested, this, [this](int first, int last, bool oldSide) {
         const FileChange* f = m_files->currentFile();
-        if (!f || m_detailsSha.isEmpty()) return;
+        if (!f || (m_detailsSha.isEmpty() && !m_compare)) return;
         if (!oldSide)
-            m_owner->showLineHistory(f->path, first, last, m_detailsSha);
+            m_owner->showLineHistory(f->path, first, last, m_detailsSha);  // empty: the working tree
         else if (!m_detailsParents.isEmpty())
             m_owner->showLineHistory(f->oldPath.isEmpty() ? f->path : f->oldPath, first, last, m_detailsParents.first());
     });
@@ -141,6 +162,7 @@ HistoryView::HistoryView(RepoView* owner) : QWidget(owner), m_owner(owner) {
 void HistoryView::setCommits(const QVector<Commit>& commits, const QVector<GraphRow>& graph,
                              const QHash<QString, QVector<RefBadge>>& badges, const QString& headSha) {
     const QString keep = selectedSha();
+    const QStringList keepSelected = selectedShas();
     const int scroll = m_list->verticalScrollBar()->value();
     {
         QSignalBlocker block(m_list->selectionModel());
@@ -150,13 +172,25 @@ void HistoryView::setCommits(const QVector<Commit>& commits, const QVector<Graph
     if (target.isEmpty() || m_model->rowOf(target) < 0) target = m_firstLoad ? headSha : QString();
     if (!target.isEmpty() && m_model->rowOf(target) >= 0) {
         const QModelIndex idx = m_model->index(m_model->rowOf(target), 0);
-        QSignalBlocker block(m_list->selectionModel());
-        m_list->selectionModel()->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        int restored = 1;
+        {
+            QSignalBlocker block(m_list->selectionModel());
+            m_list->selectionModel()->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+            for (const QString& sha : keepSelected) {
+                const int row = m_model->rowOf(sha);
+                if (sha == target || row < 0) continue;
+                m_list->selectionModel()->select(m_model->index(row, 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+                ++restored;
+            }
+        }
         if (m_firstLoad)
             m_list->scrollTo(idx, QAbstractItemView::PositionAtCenter);
         else
             m_list->verticalScrollBar()->setValue(scroll);
-        if (target != m_detailsSha) showCommit(target);
+        // A comparison survives a reload when all its commits are still listed.
+        const bool keepComparison =
+            m_compare && (m_compare->newest.isEmpty() ? m_compare->oldest == target : restored == keepSelected.size());
+        if (!keepComparison && (m_compare || target != m_detailsSha)) onSelectionChanged();
     } else if (!m_firstLoad) {
         m_list->verticalScrollBar()->setValue(scroll);
     }
@@ -186,12 +220,161 @@ void HistoryView::selectCommit(const QString& sha) {
     m_list->scrollTo(idx, QAbstractItemView::PositionAtCenter);
 }
 
-void HistoryView::onCurrentRowChanged() {
-    const QString sha = selectedSha();
-    if (!sha.isEmpty() && sha != m_detailsSha) showCommit(sha);
+QStringList HistoryView::selectedShas() const {
+    QList<int> rows;
+    for (const QModelIndex& idx : m_list->selectionModel()->selectedRows()) rows << idx.row();
+    std::sort(rows.begin(), rows.end());
+    QStringList out;
+    for (int row : rows) out << m_model->commit(row).sha;
+    return out;
+}
+
+void HistoryView::onSelectionChanged() {
+    const QStringList selected = selectedShas();
+    if (selected.size() >= 2) {
+        // A range of three or more shows the combined changes; two show the difference between them.
+        const Comparison c{selected.last(), selected.first(), int(selected.size()), selected.size() > 2};
+        if (!m_compare || !m_compare->sameAs(c)) showComparison(c);
+    } else if (selected.size() == 1) {
+        if (m_compare || selected.first() != m_detailsSha) showCommit(selected.first());
+    }
+}
+
+void HistoryView::compareWithWorkingTree(const QString& sha) {
+    const int row = m_model->rowOf(sha);
+    if (row >= 0) {
+        QSignalBlocker block(m_list->selectionModel());
+        const QModelIndex idx = m_model->index(row, 0);
+        m_list->selectionModel()->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        m_list->scrollTo(idx, QAbstractItemView::PositionAtCenter);
+    }
+    showComparison({sha, {}, 1, false});
+}
+
+void HistoryView::refreshWorkingTreeComparison() {
+    if (m_compare && m_compare->newest.isEmpty()) showComparison(*m_compare, true);
+}
+
+void HistoryView::showComparison(const Comparison& comparison, bool refresh) {
+    m_compare = comparison;
+    m_detailsSha = comparison.newest;
+    const int gen = ++m_detailsGen;
+    const Repository repo = m_owner->repo();
+    struct Data {
+        QString from;
+        QVector<FileChange> files;
+    };
+    runAsync(
+        this,
+        [repo, comparison] {
+            Data d;
+            d.from = comparison.includeOldest ? repo.baseOf(comparison.oldest) : comparison.oldest;
+            d.files = repo.compareChanges(d.from, comparison.newest);
+            return d;
+        },
+        [this, gen, refresh](const Data& d) {
+            if (gen != m_detailsGen) return;
+            m_compareFrom = d.from;
+            m_detailsParents = {d.from};
+            renderComparisonHeader(int(d.files.size()));
+            const QString keepPath = refresh && m_files->currentFile() ? m_files->currentFile()->path : QString();
+            {
+                QSignalBlocker block(m_files);
+                m_files->setFiles(d.files);
+                if (keepPath.isEmpty() || !m_files->selectPath(keepPath))
+                    m_files->setCurrentRow(d.files.isEmpty() ? -1 : 0, QItemSelectionModel::ClearAndSelect);
+            }
+            if (d.files.isEmpty())
+                m_diff->showMessage(tr("No differences."));
+            else
+                loadFileDiff(refresh && !keepPath.isEmpty() && m_files->currentFile() &&
+                             m_files->currentFile()->path == keepPath);
+        });
+}
+
+void HistoryView::renderComparisonHeader(int fileCount) {
+    const Comparison& c = *m_compare;
+    QColor dim = palette().color(QPalette::Text);
+    dim.setAlphaF(0.6f);
+    const QString dimCss = dim.name(QColor::HexArgb);
+    auto describe = [this](const QString& sha) {
+        QString text = QStringLiteral("<a href='commit:%1'><code>%2</code></a>").arg(sha, sha.left(8));
+        const int row = m_model->rowOf(sha);
+        if (row >= 0) {
+            const Commit& commit = m_model->commit(row);
+            text += QStringLiteral(" %1 <span style='opacity:0.7'>· %2 · %3</span>")
+                        .arg(commit.subject.toHtmlEscaped(), commit.authorName.toHtmlEscaped(), formatTime(commit.authorTime));
+        }
+        return text;
+    };
+    const bool workTree = c.newest.isEmpty();
+    QString title;
+    if (workTree)
+        title = c.includeOldest ? tr("Changes since before %1, up to the working tree").arg(c.oldest.left(8))
+                                : tr("Comparing %1 with the working tree").arg(c.oldest.left(8));
+    else
+        title = c.includeOldest ? tr("Combined changes of the selected commits") : tr("Differences between two commits");
+    QString html = QStringLiteral("<div style='font-size:large; font-weight:600'>%1</div>").arg(title.toHtmlEscaped());
+    html += QStringLiteral("<table cellspacing='0' cellpadding='2' style='margin-top:8px'>");
+    auto row = [&](const QString& label, const QString& value) {
+        html += QStringLiteral("<tr><td style='color:%1; padding-right:10px'>%2</td><td>%3</td></tr>").arg(dimCss, label, value);
+    };
+    row(tr("From"), c.includeOldest ? tr("before %1").arg(describe(c.oldest)) : describe(c.oldest));
+    row(tr("To"),
+        workTree ? tr("the working tree (staged and unstaged changes; untracked files are not included)") : describe(c.newest));
+    if (c.count > 2) row(tr("Selected"), tr("%n commit(s)", nullptr, c.count));
+    row(tr("Files"), tr("%n file(s) changed", nullptr, fileCount));
+    html += QStringLiteral("</table><p>");
+    const QString newer = workTree ? tr("the working tree") : c.newest.left(8);
+    html += c.includeOldest
+                ? QStringLiteral("<a href='compare:exclude'>%1</a>")
+                      .arg(tr("Show only the differences between %1 and %2").arg(c.oldest.left(8), newer).toHtmlEscaped())
+                : QStringLiteral("<a href='compare:include'>%1</a>")
+                      .arg(tr("Include the changes made by %1 itself").arg(c.oldest.left(8)).toHtmlEscaped());
+    if (fileCount > 0) html += QStringLiteral(" · <a href='compare:save'>%1</a>").arg(tr("Save as Patch…").toHtmlEscaped());
+    html += QStringLiteral("</p>");
+    m_header->setHtml(html);
+}
+
+void HistoryView::saveComparisonPatch() {
+    if (!m_compare) return;
+    const QString from = m_compareFrom;
+    const QString to = m_compare->newest;
+    const QString name =
+        QStringLiteral("%1..%2.patch").arg(from.left(8), to.isEmpty() ? QStringLiteral("working-tree") : to.left(8));
+    const QString path = QFileDialog::getSaveFileName(this, tr("Save Patch"), QDir(m_owner->repo().root()).filePath(name),
+                                                      tr("Patch files (*.patch *.diff)"));
+    if (path.isEmpty()) return;
+    const Repository repo = m_owner->repo();
+    runAsync(
+        this, [repo, from, to] { return repo.comparePatch(from, to); },
+        [this, path](const QByteArray& patch) {
+            QFile f(path);
+            if (!f.open(QIODevice::WriteOnly) || f.write(patch) != patch.size())
+                showError(this, tr("Save Patch"), f.errorString());
+            else
+                emit m_owner->statusMessage(tr("Saved %1").arg(path));
+        });
+}
+
+void HistoryView::showSelectionMenu(const QStringList& shas, const QPoint& globalPos) {
+    QStringList oldestFirst = shas;
+    std::reverse(oldestFirst.begin(), oldestFirst.end());
+    QMenu menu(this);
+    menu.addAction(theme::actionIcon(QStringLiteral("download")),
+                   tr("Save %n Commit(s) as Patch Files…", nullptr, int(shas.size())), this,
+                   [this, oldestFirst] { m_owner->savePatches(oldestFirst); });
+    menu.addAction(theme::actionIcon(QStringLiteral("file-diff")), tr("Save Diff as Patch…"), this,
+                   &HistoryView::saveComparisonPatch)
+        ->setEnabled(m_compare.has_value());
+    menu.addSeparator();
+    menu.addAction(theme::actionIcon(QStringLiteral("copy")), tr("Copy SHAs"), this,
+                   [oldestFirst] { QGuiApplication::clipboard()->setText(oldestFirst.join(QLatin1Char('\n'))); });
+    menu.exec(globalPos);
 }
 
 void HistoryView::showCommit(const QString& sha) {
+    m_compare.reset();
     m_detailsSha = sha;
     const int gen = ++m_detailsGen;
     const Repository repo = m_owner->repo();
@@ -230,23 +413,28 @@ void HistoryView::renderHeader(const CommitInfo& info) {
     m_header->setHtml(commitHeaderHtml(info, m_model->badgesFor(info.commit.sha), palette()));
 }
 
-void HistoryView::loadFileDiff() {
+void HistoryView::loadFileDiff(bool keepScroll) {
     const FileChange* f = m_files->currentFile();
-    if (!f || m_detailsSha.isEmpty()) return;
+    if (!f || (m_detailsSha.isEmpty() && !m_compare)) return;
     const int gen = ++m_diffGen;
     const Repository repo = m_owner->repo();
     const QString sha = m_detailsSha;
     const QStringList parents = m_detailsParents;
     const FileChange file = *f;
+    const bool comparing = m_compare.has_value();
+    const QString from = m_compareFrom;
     runAsync(
-        this, [repo, sha, parents, file] { return repo.commitDiff(sha, parents, file); },
-        [this, gen](const QByteArray& bytes) {
+        this,
+        [repo, sha, parents, file, comparing, from] {
+            return comparing ? repo.compareDiff(from, sha, file) : repo.commitDiff(sha, parents, file);
+        },
+        [this, gen, keepScroll](const QByteArray& bytes) {
             if (gen != m_diffGen) return;
             const QVector<FileDiff> diffs = parseDiff(bytes);
             if (diffs.isEmpty())
                 m_diff->showMessage(tr("No textual changes."));
             else
-                m_diff->setDiff(diffs.first(), DiffView::Mode::ReadOnly);
+                m_diff->setDiff(diffs.first(), DiffView::Mode::ReadOnly, keepScroll);
         });
 }
 

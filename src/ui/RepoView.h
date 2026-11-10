@@ -82,6 +82,10 @@ public:
     // "File History", "Blame" and "History of Folder" entries for `file` as of commit `sha`
     // (empty: the working tree).
     void addFileHistoryActions(QMenu& menu, const FileChange& file, const QString& sha = {}, const QStringList& parents = {});
+    // One numbered patch file per commit (oldest first) in a folder the user picks.
+    void savePatches(const QStringList& shas);
+    // Shows what changed between `sha` and the working tree in All Commits.
+    void compareWithWorkingTree(const QString& sha);
     // Selects the commit in All Commits and brings this tab and its window to the front.
     void revealCommit(const QString& sha);
     QVector<RefBadge> badgesFor(const QString& sha) const;

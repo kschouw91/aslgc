@@ -224,6 +224,7 @@ void RepoView::applySnapshot(RepoSnapshot s) {
 
     m_sidebar->setSnapshot(m_snapshot);
     m_changes->setStatus(m_snapshot.status, m_snapshot.head, m_snapshot.operation);
+    m_history->refreshWorkingTreeComparison();
     if (logChanged) {
         QHash<QString, QVector<RefBadge>> badges;
         if (h.detached && !h.sha.isEmpty()) badges[h.sha].push_back({theme::Badge::Head, QStringLiteral("HEAD")});
@@ -618,6 +619,8 @@ void RepoView::showCommitMenu(const QString& sha, const QPoint& pos, const std::
                        tr("Open Commit in %1").arg(providerName(hosted->provider)), this,
                        [this, h = *hosted, sha] { openInBrowser(webCommitUrl(h.provider, h.repo, sha)); });
     }
+    menu.addAction(theme::actionIcon(QStringLiteral("git-compare")), tr("Compare with Working Tree"), this,
+                   [this, sha] { compareWithWorkingTree(sha); });
     menu.addAction(tr("Save as Patch…"), this, [this, sha] { savePatch(sha); });
     menu.addAction(theme::actionIcon(QStringLiteral("copy")), tr("Copy SHA"), this,
                    [sha] { QGuiApplication::clipboard()->setText(sha); });
@@ -1437,6 +1440,29 @@ void RepoView::savePatch(const QString& sha) {
 }
 
 // ---------------------------------------------------------------- GitHub / GitLab
+
+void RepoView::savePatches(const QStringList& shas) {
+    if (shas.isEmpty()) return;
+    const QString dir = QFileDialog::getExistingDirectory(this, tr("Save Patch Files To"), m_repo.root());
+    if (dir.isEmpty()) return;
+    int merges = 0;
+    for (const Commit& c : m_snapshot.commits) {
+        if (c.isMerge() && shas.contains(c.sha)) ++merges;
+    }
+    const int count = int(shas.size()) - merges;
+    runCommands(tr("Save Patch Files"), formatPatchCommands(shas, dir), [this, dir, count, merges](bool ok) {
+        if (!ok) return;
+        QString message = tr("Saved %n patch file(s) to %1", nullptr, count).arg(dir);
+        if (merges > 0) message += QLatin1Char(' ') + tr("(merge commits have no patch)");
+        emit statusMessage(message);
+    });
+}
+
+void RepoView::compareWithWorkingTree(const QString& sha) {
+    m_sidebar->selectHistory();
+    m_history->compareWithWorkingTree(sha);
+    emit activateRequested();
+}
 
 std::optional<RepoView::Hosted> RepoView::hostedRemote(const QString& remoteName) const {
     for (const Remote& r : m_snapshot.remotes) {

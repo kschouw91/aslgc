@@ -183,6 +183,43 @@ QByteArray Repository::workingDiff(const FileChange& file, bool staged) const {
     return m_git.run(args).out;
 }
 
+QVector<FileChange> Repository::compareChanges(const QString& from, const QString& to) const {
+    QStringList args{QStringLiteral("diff"), QStringLiteral("--no-color"),    QStringLiteral("-z"),
+                     QStringLiteral("-M"),   QStringLiteral("--name-status"), from};
+    if (!to.isEmpty()) args << to;
+    args << QStringLiteral("--");
+    const GitResult r = m_git.run(args);
+    return r.ok() ? parse::nameStatus(r.out) : QVector<FileChange>{};
+}
+
+QByteArray Repository::compareDiff(const QString& from, const QString& to, const FileChange& file) const {
+    QStringList args{QStringLiteral("diff")};
+    args += diffBaseArgs();
+    args << QStringLiteral("-M") << from;
+    if (!to.isEmpty()) args << to;
+    args += pathspec(file);
+    return m_git.run(args).out;
+}
+
+QByteArray Repository::comparePatch(const QString& from, const QString& to) const {
+    QStringList args{QStringLiteral("diff")};
+    args += diffBaseArgs();
+    args << QStringLiteral("--binary") << QStringLiteral("-M") << from;
+    if (!to.isEmpty()) args << to;
+    args << QStringLiteral("--");
+    return m_git.run(args).out;
+}
+
+QString Repository::baseOf(const QString& sha) const {
+    const GitResult parent = m_git.run(
+        {QStringLiteral("rev-parse"), QStringLiteral("-q"), QStringLiteral("--verify"), sha + QStringLiteral("^1^{commit}")});
+    if (parent.ok()) return parent.outText().trimmed();
+    // The empty tree in this repository's hash format.
+    return m_git.run({QStringLiteral("hash-object"), QStringLiteral("-t"), QStringLiteral("tree"), QStringLiteral("--stdin")})
+        .outText()
+        .trimmed();
+}
+
 QString Repository::headMessage() const {
     const GitResult r = m_git.run({QStringLiteral("log"), QStringLiteral("-1"), QStringLiteral("--format=%B")});
     return r.ok() ? r.outText().trimmed() : QString();
@@ -276,6 +313,16 @@ Blame Repository::blame(const QString& path, const QString& rev) const {
 QString Repository::configValue(const QString& key) const {
     const GitResult r = m_git.run({QStringLiteral("config"), QStringLiteral("--get"), key});
     return r.ok() ? r.outText().trimmed() : QString();
+}
+
+QVector<GitCommand> formatPatchCommands(const QStringList& shas, const QString& dir) {
+    QVector<GitCommand> out;
+    for (int i = 0; i < shas.size(); ++i) {
+        out.push_back({{QStringLiteral("format-patch"), QStringLiteral("-1"), QStringLiteral("--start-number"),
+                        QString::number(i + 1), QStringLiteral("-o"), dir, shas[i]},
+                       {}});
+    }
+    return out;
 }
 
 RepoSnapshot loadSnapshot(const Repository& repo, const LogOptions& options, const QByteArray& previousFingerprint) {

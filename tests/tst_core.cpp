@@ -388,6 +388,89 @@ private slots:
         QVERIFY(repo.blame(QStringLiteral("bin.dat")).binary);
     }
 
+    void compareCommits() {
+        const QString dir = newRepo();
+        write(dir, QStringLiteral("a.txt"), numbered(5));
+        commitAll(dir, QStringLiteral("c1"));
+        QByteArray a = numbered(5);
+        a.replace("line 2\n", "two\n");
+        write(dir, QStringLiteral("a.txt"), a);
+        write(dir, QStringLiteral("b.txt"), numbered(20, QStringLiteral("b")));
+        write(dir, QStringLiteral("logo.bin"), QByteArray("\x89PNG\0\x01\x02", 7));
+        commitAll(dir, QStringLiteral("c2"));
+        QVERIFY(git(dir, {QStringLiteral("mv"), QStringLiteral("b.txt"), QStringLiteral("c.txt")}).ok());
+        write(dir, QStringLiteral("logo.bin"), QByteArray("\x89PNG\0\x03\x04", 7));
+        commitAll(dir, QStringLiteral("c3"));
+        const QString c1 = revOf(dir, QStringLiteral("HEAD~2"));
+        const QString c2 = revOf(dir, QStringLiteral("HEAD~1"));
+        const QString c3 = revOf(dir, QStringLiteral("HEAD"));
+        const Repository repo(dir);
+        auto statusOf = [](const QVector<FileChange>& changes) {
+            QStringList out;
+            for (const FileChange& f : changes)
+                out << QStringLiteral("%1 %2%3").arg(QChar::fromLatin1(f.status),
+                                                     f.oldPath.isEmpty() ? QString() : f.oldPath + QStringLiteral(" → "), f.path);
+            out.sort();
+            return out;
+        };
+
+        // Between two commits: c2's own changes are not included, the rename is.
+        QCOMPARE(statusOf(repo.compareChanges(c2, c3)),
+                 (QStringList{QStringLiteral("M logo.bin"), QStringLiteral("R b.txt → c.txt")}));
+        // The range c2..c3 including c2 itself starts at c2's parent.
+        QCOMPARE(repo.baseOf(c2), c1);
+        QCOMPARE(statusOf(repo.compareChanges(repo.baseOf(c2), c3)),
+                 (QStringList{QStringLiteral("A c.txt"), QStringLiteral("A logo.bin"), QStringLiteral("M a.txt")}));
+        // A root commit starts at the empty tree.
+        const QString empty = repo.baseOf(c1);
+        QCOMPARE(git(dir, {QStringLiteral("cat-file"), QStringLiteral("-t"), empty}).outText().trimmed(), QStringLiteral("tree"));
+        QCOMPARE(statusOf(repo.compareChanges(empty, c1)), QStringList{QStringLiteral("A a.txt")});
+
+        const FileDiff aDiff = onlyDiff(repo.compareDiff(c1, c3, {QStringLiteral("a.txt"), {}, 'M', {}, false}));
+        QVERIFY(lineIndex(aDiff.hunks.first(), '+', "two") >= 0);
+        const FileDiff renamed =
+            onlyDiff(repo.compareDiff(c2, c3, {QStringLiteral("c.txt"), QStringLiteral("b.txt"), 'R', {}, false}));
+        QCOMPARE(renamed.oldPath, QStringLiteral("b.txt"));
+        QCOMPARE(renamed.newPath, QStringLiteral("c.txt"));
+
+        // With the working tree: staged and unstaged changes, but not untracked files.
+        write(dir, QStringLiteral("a.txt"), a + "local\n");
+        write(dir, QStringLiteral("new.txt"), "untracked\n");
+        write(dir, QStringLiteral("c.txt"), numbered(21, QStringLiteral("b")));
+        QVERIFY(git(dir, {QStringLiteral("add"), QStringLiteral("c.txt")}).ok());
+        QCOMPARE(statusOf(repo.compareChanges(c3, {})), (QStringList{QStringLiteral("M a.txt"), QStringLiteral("M c.txt")}));
+        QVERIFY(lineIndex(onlyDiff(repo.compareDiff(c3, {}, {QStringLiteral("a.txt"), {}, 'M', {}, false})).hunks.first(), '+',
+                          "local") >= 0);
+
+        // The patch of a comparison, binary file included, turns c1 into c3.
+        const QByteArray patch = repo.comparePatch(c1, c3);
+        QVERIFY(patch.contains("GIT binary patch"));
+        const QString clone = m_tmp.filePath(QStringLiteral("compare-clone"));
+        QVERIFY(git(dir, {QStringLiteral("clone"), QStringLiteral("-q"), dir, clone}).ok());
+        QVERIFY(git(clone, {QStringLiteral("checkout"), QStringLiteral("-q"), c1}).ok());
+        const GitResult applied = git(clone, {QStringLiteral("apply"), QStringLiteral("--index"), QStringLiteral("-")}, patch);
+        QVERIFY2(applied.ok(), qPrintable(applied.message()));
+        QVERIFY(git(clone, {QStringLiteral("diff"), QStringLiteral("--cached"), QStringLiteral("--quiet"), c3}).ok());
+
+        // Patch files per commit, oldest first: `git am` replays them on c1.
+        const QString patches = m_tmp.filePath(QStringLiteral("patches"));
+        for (const GitCommand& cmd : formatPatchCommands({c2, c3}, patches)) {
+            const GitResult r = git(dir, cmd.args);
+            QVERIFY2(r.ok(), qPrintable(r.message()));
+        }
+        const QStringList files = QDir(patches).entryList({QStringLiteral("*.patch")}, QDir::Files, QDir::Name);
+        QCOMPARE(files.size(), 2);
+        QVERIFY(files[0].startsWith(QLatin1String("0001-")));
+        QVERIFY(files[1].startsWith(QLatin1String("0002-")));
+        QVERIFY(git(clone, {QStringLiteral("checkout"), QStringLiteral("-q"), QStringLiteral("-f"), c1}).ok());
+        const GitResult am = git(clone, QStringList{QStringLiteral("am"), QStringLiteral("-q")} +
+                                            QStringList{QDir(patches).filePath(files[0]), QDir(patches).filePath(files[1])});
+        QVERIFY2(am.ok(), qPrintable(am.message()));
+        QVERIFY(git(clone, {QStringLiteral("diff"), QStringLiteral("--quiet"), QStringLiteral("HEAD"), c3}).ok());
+        QCOMPARE(git(clone, {QStringLiteral("log"), QStringLiteral("-1"), QStringLiteral("--format=%s")}).outText().trimmed(),
+                 QStringLiteral("c3"));
+    }
+
     void lineMapping() {
         // old: 1..10 → new: two lines inserted after 2, line 5 replaced by two lines, line 8 removed
         const FileDiff d = onlyDiff(
@@ -824,6 +907,21 @@ private slots:
         QCOMPARE(ns.size(), 2);
         QCOMPARE(ns[1].oldPath, QStringLiteral("old.txt"));
         QCOMPARE(ns[1].path, QStringLiteral("new.txt"));
+
+        // Older git prints `log -L` diffs without "new/deleted file mode" lines.
+        auto record = [](const QByteArray& sha, const QByteArray& subject, const QByteArray& diff) {
+            return "\x1e" + QByteArrayList{sha, {}, "A", "a@x", "1", "A", "a@x", "1", subject}.join('\x1f') + "\n\n" + diff;
+        };
+        const QVector<LineLogEntry> lineLog = parse::lineLog(
+            record("c2", "gone", "diff --git a/a b.txt b/a b.txt\n--- a/a b.txt\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-1\n") +
+            record("c1", "add", "diff --git a/a b.txt b/a b.txt\n--- /dev/null\n+++ b/a b.txt\n@@ -0,0 +1,1 @@\n+1\n"));
+        QCOMPARE(lineLog.size(), 2);
+        QVERIFY(lineLog[0].diff.deletedFile);
+        QCOMPARE(lineLog[0].diff.oldPath, QStringLiteral("a b.txt"));
+        QVERIFY(lineLog[1].diff.newFile);
+        QVERIFY(lineLog[1].diff.oldPath.isEmpty());
+        QCOMPARE(lineLog[1].diff.newPath, QStringLiteral("a b.txt"));
+        QCOMPARE(lineLog[1].diff.hunks.first().lines.size(), 1);
     }
 
     void remoteUrlParsing_data() {

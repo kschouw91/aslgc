@@ -17,7 +17,7 @@ Legend: `[x]` done · `[ ]` to do · size **S** < 1 day, **M** 1–3 days, **L**
 
 ## 0. Housekeeping
 - [x] Connected to github.com/kyleschouw/aslgc (working copy = project root)
-- [ ] First commit and push — S
+- [x] First commit and push
 - [x] MIT license, third-party notices, SPDX headers, `.clang-format`, `.editorconfig`
 - [x] README for users and packagers, CONTRIBUTING, CHANGELOG, screenshots
 - [x] CI: build, tests, UI smoke test (offscreen screenshots) and staged install on Arch, Fedora, Debian 13, Ubuntu 24.04
@@ -66,14 +66,14 @@ Legend: `[x]` done · `[ ]` to do · size **S** < 1 day, **M** 1–3 days, **L**
 - [ ] Blame options: ignore whitespace, detect moved / copied lines (`-w -M -C`) — S
 - [ ] File history: show uncommitted changes as the first row; pick another branch than HEAD — S
 - [x] History of selected lines (`git log -L`): from the blame view or any commit diff; follows renames; working tree lines are matched to HEAD's
-- [ ] Compare two selected commits; compare a commit with the working tree; range diff and range patch — M
+- [x] Compare commits: select two to see their differences, three or more (or "include the oldest") for their combined changes; compare any commit with the working tree; save either as a patch
 - [ ] File tree at a revision: browse, open, save a file as of that commit — M
 - [ ] Reflog view, plus an option to show reflog entries in the graph — S
 - [ ] Graph filters: current branch only, chosen branches, hide tags, show/hide stashes, collapse merges — M
 - [ ] Pin branches so they stay at the top and in the filter — S
 - [ ] Layout options: details pane bottom or right, hide details pane, open a commit in its own window — S
 - [ ] Search by file path, by content (`-S` / `-G`), by date range, with a results list — M
-- [ ] Save a range of commits as patches — S
+- [x] Save selected commits as numbered patch files (`git format-patch`, ready for `git am`)
 - [ ] Author avatars (opt-in, cached) and per-author colours — S
 - [ ] Turn issue IDs in commit messages into links (bug-tracker rules) — S
 - [ ] Load more than 20 000 commits on demand — M
@@ -144,7 +144,7 @@ Legend: `[x]` done · `[ ]` to do · size **S** < 1 day, **M** 1–3 days, **L**
 - [ ] Accessibility pass: accessible names, full keyboard navigation — M
 
 ## Needs verification
-- [ ] First CI run on all four distros, especially Ubuntu 24.04: the Qt 6.4 minimum is not yet proven
+- [x] First CI run on all four distros: Arch, Fedora, Debian 13 and Ubuntu 24.04 with Qt 6.4 all pass
 - [ ] `packaging/arch/PKGBUILD` builds once the code is pushed
 - [ ] Real GitHub and GitLab sign-in: repository picker, pull/merge request creation, token-based HTTPS push (so far only checked against the live APIs with an invalid token)
 - [ ] GitHub browser sign-in end to end (needs the registered OAuth App Client ID)

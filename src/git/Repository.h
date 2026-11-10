@@ -43,6 +43,14 @@ public:
     QVector<FileChange> commitChanges(const QString& sha, const QStringList& parents, const QString& folder = {}) const;
     QByteArray commitDiff(const QString& sha, const QStringList& parents, const FileChange& file) const;
     QByteArray workingDiff(const FileChange& file, bool staged) const;
+
+    // Comparisons of `from` (any commit or tree) with `to`; an empty `to` means the working tree,
+    // i.e. staged and unstaged changes to tracked files (untracked files are not included).
+    QVector<FileChange> compareChanges(const QString& from, const QString& to) const;
+    QByteArray compareDiff(const QString& from, const QString& to, const FileChange& file) const;
+    QByteArray comparePatch(const QString& from, const QString& to) const;  // whole comparison, binary safe
+    // Where the changes of `sha` start: its first parent, or the empty tree for a root commit.
+    QString baseOf(const QString& sha) const;
     QString headMessage() const;
     QStringList trackedFiles() const;
 
@@ -86,5 +94,9 @@ struct RepoSnapshot {
 };
 
 RepoSnapshot loadSnapshot(const Repository& repo, const LogOptions& options, const QByteArray& previousFingerprint);
+
+// `git format-patch` commands that write one numbered patch file per commit into `dir`, in the
+// given order (oldest first, so `git am` can apply them). Merge commits produce no file.
+QVector<GitCommand> formatPatchCommands(const QStringList& shas, const QString& dir);
 
 }  // namespace aslgc

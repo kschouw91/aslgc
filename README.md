@@ -12,7 +12,7 @@ helpers and `~/.gitconfig` behave exactly as they do in a terminal.
 ## Features
 
 - **Repository tabs** with session restore and a recent-repositories start page
-- **Commit graph** with coloured lanes, branch / tag / remote labels, commit details and per-file diffs; search by message, author or SHA
+- **Commit graph** with coloured lanes, branch / tag / remote labels, commit details and per-file diffs; search by message, author or SHA; select several commits to compare them or save them as patches
 - **Local changes**: stage, unstage or discard whole files, single hunks or just the lines you select; commit and amend
 - **Branches, remotes, tags and stashes** in a sidebar, each with a context menu: checkout, create, rename, delete, track, fast-forward, merge (ff / no-ff / ff-only / squash), rebase, cherry-pick, revert, reset, tag, stash
 - **Interactive rebase**: reorder, reword, edit, squash, fix up or drop commits in a dialog; edit any commit's message

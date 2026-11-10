@@ -36,6 +36,30 @@
     </message>
 </context>
 <context>
+    <name>aslgc::HistoryView</name>
+    <message numerus="yes">
+        <source>%n commit(s)</source>
+        <translation>
+            <numerusform>%n commit</numerusform>
+            <numerusform>%n commits</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <source>%n file(s) changed</source>
+        <translation>
+            <numerusform>%n file changed</numerusform>
+            <numerusform>%n files changed</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <source>Save %n Commit(s) as Patch Files…</source>
+        <translation>
+            <numerusform>Save %n Commit as a Patch File…</numerusform>
+            <numerusform>Save %n Commits as Patch Files…</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>aslgc::InteractiveRebaseDialog</name>
     <message numerus="yes">
         <source>%n merge commit(s) in this range will be flattened.</source>
@@ -69,6 +93,13 @@
         <translation>
             <numerusform> — %n commit ahead</numerusform>
             <numerusform> — %n commits ahead</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <source>Saved %n patch file(s) to %1</source>
+        <translation>
+            <numerusform>Saved %n patch file to %1</numerusform>
+            <numerusform>Saved %n patch files to %1</numerusform>
         </translation>
     </message>
     <message numerus="yes">
