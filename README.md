@@ -16,7 +16,7 @@ helpers and `~/.gitconfig` behave exactly as they do in a terminal.
 - **Local changes**: stage, unstage or discard whole files, single hunks or just the lines you select; commit and amend
 - **Branches, remotes, tags and stashes** in a sidebar, each with a context menu: checkout, create, rename, delete, track, fast-forward, merge (ff / no-ff / ff-only / squash), rebase, cherry-pick, revert, reset, tag, stash
 - **Interactive rebase**: reorder, reword, edit, squash, fix up or drop commits in a dialog; edit any commit's message
-- **git-flow**: set up, start and finish features, bugfixes, releases and hotfixes (merge, tag, delete, push) from the toolbar or a branch's menu; shares its settings with the git-flow command line tool
+- **git-flow**: set up, start and finish features, bugfixes, releases and hotfixes (fetch, merge, tag, delete, push) from the toolbar or a branch's menu; support branches for older release lines; shares its settings with the git-flow command line tool
 - **File history and blame**: the history of any file (following renames), folder or selected lines, and a line-by-line blame that clicks through to each commit and steps back to earlier revisions
 - **Fetch, pull and push** with a progress dialog; credential and SSH passphrase prompts handled in the GUI
 - **Conflicts**: highlighted conflict markers, resolve with ours / theirs / merge tool, and a Continue · Skip · Abort banner for merges, rebases, cherry-picks and reverts

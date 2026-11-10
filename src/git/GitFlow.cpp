@@ -7,6 +7,8 @@
 #include <QRegularExpression>
 #include <QVersionNumber>
 
+#include <algorithm>
+
 namespace aslgc::flow {
 
 namespace {
@@ -69,6 +71,7 @@ QString Config::prefix(Kind kind) const {
         case Kind::Bugfix: return bugfixPrefix;
         case Kind::Release: return releasePrefix;
         case Kind::Hotfix: return hotfixPrefix;
+        case Kind::Support: return supportPrefix;
     }
     return {};
 }
@@ -112,6 +115,8 @@ Config parseConfig(const QByteArray& data) {
             c.supportPrefix = value;
         else if (key == QLatin1String("gitflow.prefix.versiontag"))
             c.versionTagPrefix = value;
+        else if (key.startsWith(QLatin1String("gitflow.branch.")) && key.endsWith(QLatin1String(".base")))
+            c.bases.insert(rawKey.mid(15, rawKey.size() - 20), value);  // the branch name keeps its case
     }
     return c;
 }
@@ -137,7 +142,7 @@ Plan planInit(const Repository& repo, const Config& c, const QString& remote, bo
         p.error = tr("The production and develop branches must be different.");
         return p;
     }
-    for (const QString& prefix : {c.featurePrefix, c.bugfixPrefix, c.releasePrefix, c.hotfixPrefix}) {
+    for (const QString& prefix : {c.featurePrefix, c.bugfixPrefix, c.releasePrefix, c.hotfixPrefix, c.supportPrefix}) {
         if (prefix.isEmpty() || !validBranchName(git, prefix + s("x"))) {
             p.error = tr("“%1” cannot be used as a branch prefix.").arg(prefix);
             return p;
@@ -225,29 +230,67 @@ Plan planStart(const Repository& repo, const Config& c, Kind kind, const QString
         }
     }
     QString base = rawBase.trimmed();
-    if (base.isEmpty()) base = kind == Kind::Hotfix ? c.production : c.develop;
+    if (base.isEmpty()) base = kind == Kind::Feature || kind == Kind::Bugfix || kind == Kind::Release ? c.develop : c.production;
     if (!refExists(git, base)) {
         p.error = tr("“%1” does not exist.").arg(base);
         return p;
     }
+    // Like the git-flow tools: a support branch carries on from something already released.
+    if (kind == Kind::Support && !isAncestor(git, base, s("refs/heads/") + c.production)) {
+        p.error = tr("A support branch starts from a commit of “%1”, usually a version tag. “%2” is not on it.")
+                      .arg(c.production, base);
+        return p;
+    }
     p.commands << cmd({s("checkout"), s("-b"), branch, base});
+    if (Config::isFinishable(kind) && refExists(git, s("refs/heads/") + base))
+        p.commands << cmd({s("config"), s("--local"), s("gitflow.branch.%1.base").arg(branch), base});
     return p;
 }
 
-Plan planFinish(const Repository& repo, const Config& c, Kind kind, const QString& name, const FinishOptions& o) {
+Targets finishTargets(const Config& c, Kind kind, const QString& name, const QStringList& localBranches) {
+    const QString branch = c.prefix(kind) + name;
+    const QString base = c.bases.value(branch);
+    const bool baseExists = !base.isEmpty() && base != branch && localBranches.contains(base);
+    switch (kind) {
+        case Kind::Feature:
+        case Kind::Bugfix: return {baseExists ? base : c.develop, {}};
+        case Kind::Release: return {c.production, c.develop};
+        case Kind::Hotfix: {
+            if (baseExists && base.startsWith(c.supportPrefix) && base.size() > c.supportPrefix.size()) return {base, {}};
+            // A hotfix also goes into the open release branch instead of develop, so it is not lost.
+            const QStringList releases = withPrefix(localBranches, c.releasePrefix);
+            return {c.production, releases.isEmpty() ? c.develop : releases.first()};
+        }
+        case Kind::Support: break;
+    }
+    return {};
+}
+
+Plan planFinish(const Repository& repo, const Config& config, Kind kind, const QString& name, const FinishOptions& o) {
     Plan p;
     const Git& git = repo.git();
+    // Branch bases are recorded when a branch starts, so they may be newer than `config`.
+    Config c = config;
+    const Config stored = loadConfig(repo);
+    c.bases = stored.bases;
+    c.sections = stored.sections;
     if (!c.isInitialized()) {
         p.error = tr("Git-flow is not set up in this repository.");
         return p;
     }
+    if (!Config::isFinishable(kind)) {
+        p.error = tr("Support branches stay open; they are not finished.");
+        return p;
+    }
     const QString branch = c.prefix(kind) + name;
-    if (!refExists(git, s("refs/heads/") + branch)) {
+    const QStringList locals = localBranches(git);
+    if (!locals.contains(branch)) {
         p.error = tr("The branch “%1” does not exist.").arg(branch);
         return p;
     }
-    for (const QString& b : {c.production, c.develop}) {
-        if (!refExists(git, s("refs/heads/") + b)) {
+    const Targets targets = finishTargets(c, kind, name, locals);
+    for (const QString& b : {targets.into, targets.back}) {
+        if (!b.isEmpty() && !locals.contains(b)) {
             p.error = tr("The branch “%1” does not exist.").arg(b);
             return p;
         }
@@ -255,33 +298,49 @@ Plan planFinish(const Repository& repo, const Config& c, Kind kind, const QStrin
     p.error = checkWorkTree(repo);
     if (!p.ok()) return p;
 
+    // Like the git-flow tools: work on top of what is already on the remote. A branch that is
+    // behind its remote copy is fast-forwarded first; one that has diverged needs a pull.
+    QHash<QString, QString> fastForward;  // branch → remote-tracking ref it moves to
+    for (const QString& b : {branch, targets.into, targets.back}) {
+        if (b.isEmpty() || o.remote.isEmpty()) continue;
+        const QString local = s("refs/heads/") + b;
+        const QString remoteRef = s("refs/remotes/%1/%2").arg(o.remote, b);
+        if (!refExists(git, remoteRef) || isAncestor(git, remoteRef, local)) continue;
+        if (!isAncestor(git, local, remoteRef)) {
+            p.error = tr("“%1” and “%2/%1” have diverged. Pull “%1” first, then finish again.").arg(b, o.remote);
+            return p;
+        }
+        fastForward.insert(b, remoteRef);
+    }
+    // Where a branch will be once it is up to date, for deciding which steps are left.
+    auto tip = [&fastForward](const QString& b) { return fastForward.value(b, s("refs/heads/") + b); };
+    auto checkout = [&](const QString& b) {
+        p.commands << cmd({s("checkout"), b});
+        if (fastForward.contains(b)) p.commands << cmd({s("merge"), s("--ff-only"), fastForward.value(b)});
+    };
+
     QStringList push;
     auto pushBranch = [&push](const QString& b) { push << s("refs/heads/%1:refs/heads/%1").arg(b); };
+    if (fastForward.contains(branch)) checkout(branch);
     if (!Config::isVersioned(kind)) {
-        const QString target = c.develop;
-        p.commands << cmd({s("checkout"), target});
+        const QString& target = targets.into;
+        checkout(target);
         if (o.squash) {
-            if (commitsMissing(git, target, branch) > 0) {
+            if (commitsMissing(git, tip(target), tip(branch)) > 0) {
                 p.commands << cmd({s("merge"), s("--squash"), branch});
                 p.commands << cmd({s("commit")});  // takes git's prepared "Squashed commit of …" message
             }
-        } else if (!isAncestor(git, branch, target)) {
+        } else if (!isAncestor(git, tip(branch), tip(target))) {
             // A single commit is fast-forwarded when possible, like the git-flow tools do.
-            const bool single = commitsMissing(git, target, branch) == 1;
+            const bool single = commitsMissing(git, tip(target), tip(branch)) == 1;
             p.commands << cmd({s("merge"), o.noFastForward || !single ? s("--no-ff") : s("--ff"), branch});
         }
         pushBranch(target);
     } else {
         const QString tag = c.versionTagPrefix + name;
-        // A hotfix also goes into the open release branch instead of develop, so it is not lost.
-        QString back = c.develop;
-        if (kind == Kind::Hotfix) {
-            const QStringList releases = withPrefix(localBranches(git), c.releasePrefix);
-            if (!releases.isEmpty()) back = releases.first();
-        }
-        p.commands << cmd({s("checkout"), c.production});
-        if (!isAncestor(git, branch, c.production)) p.commands << cmd({s("merge"), s("--no-ff"), branch});
-        pushBranch(c.production);
+        checkout(targets.into);
+        if (!isAncestor(git, tip(branch), tip(targets.into))) p.commands << cmd({s("merge"), s("--no-ff"), branch});
+        pushBranch(targets.into);
         if (o.tag) {
             if (!tagExists(git, tag)) {
                 const QString message = o.tagMessage.trimmed().isEmpty() ? tag : o.tagMessage.trimmed();
@@ -289,29 +348,52 @@ Plan planFinish(const Repository& repo, const Config& c, Kind kind, const QStrin
             }
             push << s("refs/tags/%1:refs/tags/%1").arg(tag);
         }
-        p.commands << cmd({s("checkout"), back});
-        if (!isAncestor(git, branch, back)) p.commands << cmd({s("merge"), s("--no-ff"), branch});
-        pushBranch(back);
+        if (!targets.back.isEmpty()) {
+            checkout(targets.back);
+            if (!isAncestor(git, tip(branch), tip(targets.back))) p.commands << cmd({s("merge"), s("--no-ff"), branch});
+            pushBranch(targets.back);
+        }
     }
+    const bool publish = o.push && !o.remote.isEmpty();
     if (!o.keepBranch) {
         p.commands << cmd({s("branch"), o.squash && !Config::isVersioned(kind) ? s("-D") : s("-d"), branch});
-        if (!o.remote.isEmpty() && refExists(git, s("refs/remotes/%1/%2").arg(o.remote, branch)))
-            push << s(":refs/heads/%1").arg(branch);
+        const QString section = s("gitflow.branch.") + branch;
+        if (c.sections.contains(section)) p.commands << cmd({s("config"), s("--local"), s("--remove-section"), section});
+        if (publish && refExists(git, s("refs/remotes/%1/%2").arg(o.remote, branch))) push << s(":refs/heads/%1").arg(branch);
     }
-    if (!o.remote.isEmpty()) p.pushArgs = QStringList{s("push"), s("--progress"), o.remote} + push;
+    if (publish) p.pushArgs = QStringList{s("push"), s("--progress"), o.remote} + push;
     return p;
 }
 
-QString suggestVersion(const QStringList& tags, const QString& tagPrefix, Kind kind) {
+namespace {
+// The `<tagPrefix>X[.Y[.Z[.W]]]` tags among `tags` with their versions, highest first.
+QVector<std::pair<QVersionNumber, QString>> parseVersionTags(const QStringList& tags, const QString& tagPrefix) {
     static const QRegularExpression versionRe(QStringLiteral("^\\d+(\\.\\d+){0,3}$"));
-    QVersionNumber highest;
+    QVector<std::pair<QVersionNumber, QString>> out;
     for (const QString& tag : tags) {
         if (!tag.startsWith(tagPrefix)) continue;
         const QString v = tag.mid(tagPrefix.size());
-        if (!versionRe.match(v).hasMatch()) continue;
-        const QVersionNumber n = QVersionNumber::fromString(v);
-        if (n > highest) highest = n;
+        if (versionRe.match(v).hasMatch()) out.push_back({QVersionNumber::fromString(v), tag});
     }
+    std::stable_sort(out.begin(), out.end(), [](const auto& x, const auto& y) { return x.first > y.first; });
+    return out;
+}
+}  // namespace
+
+QStringList versionTags(const QStringList& tags, const QString& tagPrefix) {
+    QStringList out;
+    for (const auto& entry : parseVersionTags(tags, tagPrefix)) out << entry.second;
+    return out;
+}
+
+QStringList tagsReachableFrom(const Repository& repo, const QString& ref) {
+    const GitResult r = repo.git().run({s("tag"), s("--list"), s("--merged"), ref});
+    return r.ok() ? r.outText().split(QLatin1Char('\n'), Qt::SkipEmptyParts) : QStringList{};
+}
+
+QString suggestVersion(const QStringList& tags, const QString& tagPrefix, Kind kind) {
+    const auto parsed = parseVersionTags(tags, tagPrefix);
+    const QVersionNumber highest = parsed.isEmpty() ? QVersionNumber() : parsed.first().first;
     if (highest.isNull()) return kind == Kind::Release ? QStringLiteral("1.0.0") : QString();
     QList<int> parts = highest.segments();
     while (parts.size() < 3) parts << 0;

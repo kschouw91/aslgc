@@ -67,7 +67,7 @@ public:
     void populateGitFlowMenu(QMenu* menu);
     void gitFlowSetup();
     void gitFlowRemove();
-    void gitFlowStart(flow::Kind kind);
+    void gitFlowStart(flow::Kind kind, const QString& base = {});
     void gitFlowFinish(flow::Kind kind, const QString& name);
 
     // `extra` adds entries at the top of the menu.

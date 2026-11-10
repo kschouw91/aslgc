@@ -20,7 +20,9 @@ First public release.
 - Optional GitHub browser sign-in through the OAuth device flow.
 - Interactive rebase editor (reorder, reword, edit, squash, fixup, drop) and Edit Commit Message for any commit.
 - git-flow: set up, start and finish features, bugfixes, releases and hotfixes, with version suggestions,
-  tagging and optional push. Uses the same settings as the git-flow command line tool.
+  tagging and optional push. Support branches keep older release lines alive, with hotfixes of their own.
+  Finishing can fetch first and fast-forwards branches that are behind the remote. Uses the same
+  settings as the git-flow command line tool.
 - File history for any file (following renames) or folder, and a blame view that clicks through to
   each commit and steps back through earlier revisions (View → File History…, or a file's context menu).
 - Commit comparison: select two commits for their differences or a range for its combined changes, compare

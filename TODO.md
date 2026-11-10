@@ -13,7 +13,10 @@ Legend: `[x]` done · `[ ]` to do · size **S** < 1 day, **M** 1–3 days, **L**
   - Finish: merge back, tag releases and hotfixes, delete the branch, optionally push; re-running Finish after resolving a conflict picks up where it stopped
   - Uses the `gitflow.*` settings of the git-flow (AVH) command line tool, so both work side by side
   - Toolbar button, Repository menu and sidebar branch menus
-- [ ] git-flow: support branches; fetch before finishing — S
+- [x] git-flow: support branches and fetch before finishing
+  - Support branches start from a release (a version tag or a production commit) and stay open; their hotfixes go back only into them and continue their version line
+  - The branch a flow branch starts from is recorded (`gitflow.branch.<name>.base`), so a feature started from another feature finishes back into it
+  - Finish can fetch first; branches behind their remote copy are fast-forwarded before merging, diverged ones stop the finish with a hint to pull
 
 ## 0. Housekeeping
 - [x] Connected to github.com/kyleschouw/aslgc (working copy = project root)

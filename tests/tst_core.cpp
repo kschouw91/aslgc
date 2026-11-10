@@ -755,7 +755,8 @@ private slots:
         const flow::Plan resume = flow::planFinish(repo, c, flow::Kind::Hotfix, QStringLiteral("1.0.1"));
         QVERIFY2(resume.ok(), qPrintable(resume.error));
         for (const GitCommand& cmd : resume.commands) {
-            QVERIFY2(cmd.args.first() == QLatin1String("checkout") || cmd.args.first() == QLatin1String("branch"),
+            const QString& verb = cmd.args.first();
+            QVERIFY2(verb == QLatin1String("checkout") || verb == QLatin1String("branch") || verb == QLatin1String("config"),
                      qPrintable(cmd.args.join(QLatin1Char(' '))));
         }
         QVERIFY(runPlan(dir, resume).ok());
@@ -779,6 +780,7 @@ private slots:
         QVERIFY(git(dir, {QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("origin"), remote}).ok());
         QVERIFY(git(dir, {QStringLiteral("push"), QStringLiteral("-q"), QStringLiteral("origin"), QStringLiteral("--all")}).ok());
         o.remote = QStringLiteral("origin");
+        o.push = true;
         o.tagMessage.clear();
         const flow::Plan publish = flow::planFinish(repo, c, flow::Kind::Release, QStringLiteral("1.1"), o);
         QVERIFY2(publish.ok(), qPrintable(publish.error));
@@ -800,6 +802,152 @@ private slots:
                      .ok());
         QCOMPARE(git(dir, {QStringLiteral("tag"), QStringLiteral("-n1"), QStringLiteral("v1.1")}).outText().simplified(),
                  QStringLiteral("v1.1 v1.1"));  // default tag message: the tag name
+    }
+
+    void gitFlowSupportAndBases() {
+        const QString dir = newRepo();
+        write(dir, QStringLiteral("a.txt"), numbered(10));
+        commitAll(dir, QStringLiteral("init"));
+        const Repository repo(dir);
+        const flow::Config c = initFlow(dir);
+        auto release = [&](const QString& version) {
+            QVERIFY(runPlan(dir, flow::planStart(repo, c, flow::Kind::Release, version)).ok());
+            write(dir, QStringLiteral("VERSION"), version.toUtf8() + '\n');
+            commitAll(dir, QStringLiteral("version ") + version);
+            QVERIFY(runPlan(dir, flow::planFinish(repo, c, flow::Kind::Release, version)).ok());
+        };
+        release(QStringLiteral("1.0"));
+        release(QStringLiteral("2.0"));
+        QCOMPARE(flow::versionTags({QStringLiteral("v1.0"), QStringLiteral("v10.1"), QStringLiteral("x"), QStringLiteral("v2.0")},
+                                   QStringLiteral("v")),
+                 (QStringList{QStringLiteral("v10.1"), QStringLiteral("v2.0"), QStringLiteral("v1.0")}));
+
+        // A support branch starts from a release, never from unreleased work, and is not finished.
+        write(dir, QStringLiteral("dev.txt"), "unreleased\n");
+        commitAll(dir, QStringLiteral("unreleased work"));
+        QVERIFY(flow::planStart(repo, c, flow::Kind::Support, QStringLiteral("2.x"), QStringLiteral("develop"))
+                    .error.contains(QLatin1String("main")));
+        const flow::Plan support = flow::planStart(repo, c, flow::Kind::Support, QStringLiteral("1.x"), QStringLiteral("v1.0"));
+        QVERIFY2(support.ok(), qPrintable(support.error));
+        QVERIFY(runPlan(dir, support).ok());
+        QCOMPARE(currentBranch(dir), QStringLiteral("support/1.x"));
+        QCOMPARE(revOf(dir, QStringLiteral("HEAD")), revOf(dir, QStringLiteral("v1.0^{commit}")));
+        flow::Kind kind = flow::Kind::Feature;
+        QVERIFY(c.classify(QStringLiteral("support/1.x"), &kind, nullptr));
+        QCOMPARE(kind, flow::Kind::Support);
+        QVERIFY(!flow::planFinish(repo, c, flow::Kind::Support, QStringLiteral("1.x")).ok());
+        QVERIFY(flow::loadConfig(repo).bases.isEmpty());
+
+        // A hotfix of the support branch goes only into it, tagged there, and continues its versions.
+        const QStringList supportTags = flow::tagsReachableFrom(repo, QStringLiteral("support/1.x"));
+        QCOMPARE(supportTags, QStringList{QStringLiteral("v1.0")});
+        QCOMPARE(flow::suggestVersion(supportTags, QStringLiteral("v"), flow::Kind::Hotfix), QStringLiteral("1.0.1"));
+        QVERIFY(runPlan(dir, flow::planStart(repo, c, flow::Kind::Hotfix, QStringLiteral("1.0.1"), QStringLiteral("support/1.x")))
+                    .ok());
+        QCOMPARE(flow::loadConfig(repo).bases.value(QStringLiteral("hotfix/1.0.1")), QStringLiteral("support/1.x"));
+        write(dir, QStringLiteral("fix.txt"), "old line fix\n");
+        commitAll(dir, QStringLiteral("fix for 1.x"));
+        const QString fix = revOf(dir, QStringLiteral("HEAD"));
+        const QStringList locals{QStringLiteral("main"), QStringLiteral("develop"), QStringLiteral("support/1.x"),
+                                 QStringLiteral("hotfix/1.0.1")};
+        const flow::Targets targets =
+            flow::finishTargets(flow::loadConfig(repo), flow::Kind::Hotfix, QStringLiteral("1.0.1"), locals);
+        QCOMPARE(targets.into, QStringLiteral("support/1.x"));
+        QVERIFY(targets.back.isEmpty());
+        const GitResult fixed = runPlan(dir, flow::planFinish(repo, c, flow::Kind::Hotfix, QStringLiteral("1.0.1")));
+        QVERIFY2(fixed.ok(), qPrintable(fixed.message()));
+        QCOMPARE(currentBranch(dir), QStringLiteral("support/1.x"));
+        QVERIFY(contains(dir, QStringLiteral("support/1.x"), fix));
+        QVERIFY(!contains(dir, QStringLiteral("main"), fix));
+        QVERIFY(!contains(dir, QStringLiteral("develop"), fix));
+        QCOMPARE(revOf(dir, QStringLiteral("v1.0.1^{commit}")), revOf(dir, QStringLiteral("support/1.x")));
+        QVERIFY(revOf(dir, QStringLiteral("refs/heads/hotfix/1.0.1")).isEmpty());
+        QVERIFY(repo.configValue(QStringLiteral("gitflow.branch.hotfix/1.0.1.base")).isEmpty());  // cleaned up
+
+        // A feature started from another feature goes back into it; once that one is gone, into develop.
+        QVERIFY(runPlan(dir, flow::planStart(repo, c, flow::Kind::Feature, QStringLiteral("a"))).ok());
+        write(dir, QStringLiteral("a-feature.txt"), "a\n");
+        commitAll(dir, QStringLiteral("feature a"));
+        QVERIFY(runPlan(dir, flow::planStart(repo, c, flow::Kind::Feature, QStringLiteral("a-part"), QStringLiteral("feature/a")))
+                    .ok());
+        write(dir, QStringLiteral("a-part.txt"), "part\n");
+        commitAll(dir, QStringLiteral("part of a"));
+        const QString part = revOf(dir, QStringLiteral("HEAD"));
+        QVERIFY(runPlan(dir, flow::planFinish(repo, c, flow::Kind::Feature, QStringLiteral("a-part"))).ok());
+        QCOMPARE(currentBranch(dir), QStringLiteral("feature/a"));
+        QVERIFY(contains(dir, QStringLiteral("feature/a"), part));
+        QVERIFY(!contains(dir, QStringLiteral("develop"), part));
+        flow::Config withGoneBase = flow::loadConfig(repo);
+        withGoneBase.bases.insert(QStringLiteral("feature/b"), QStringLiteral("feature/gone"));
+        QCOMPARE(flow::finishTargets(withGoneBase, flow::Kind::Feature, QStringLiteral("b"), locals).into,
+                 QStringLiteral("develop"));
+    }
+
+    void gitFlowFinishWithRemote() {
+        const QString dir = newRepo();
+        write(dir, QStringLiteral("a.txt"), numbered(10));
+        commitAll(dir, QStringLiteral("init"));
+        const Repository repo(dir);
+        const flow::Config c = initFlow(dir);
+        const QString remote = m_tmp.filePath(QStringLiteral("flow-sync.git"));
+        QVERIFY(git(dir, {QStringLiteral("init"), QStringLiteral("-q"), QStringLiteral("--bare"), remote}).ok());
+        QVERIFY(git(dir, {QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("origin"), remote}).ok());
+        QVERIFY(runPlan(dir, flow::planStart(repo, c, flow::Kind::Feature, QStringLiteral("shared"))).ok());
+        write(dir, QStringLiteral("shared.txt"), "mine\n");
+        commitAll(dir, QStringLiteral("my part"));
+        QVERIFY(git(dir, {QStringLiteral("push"), QStringLiteral("-q"), QStringLiteral("origin"), QStringLiteral("--all")}).ok());
+
+        // A teammate adds to both develop and the feature.
+        const QString other = m_tmp.filePath(QStringLiteral("flow-sync-clone"));
+        QVERIFY(git(m_tmp.path(), {QStringLiteral("clone"), QStringLiteral("-q"), remote, other}).ok());
+        QVERIFY(git(other, {QStringLiteral("checkout"), QStringLiteral("-q"), QStringLiteral("develop")}).ok());
+        write(other, QStringLiteral("theirs.txt"), "develop\n");
+        commitAll(other, QStringLiteral("their develop work"));
+        QVERIFY(git(other, {QStringLiteral("checkout"), QStringLiteral("-q"), QStringLiteral("feature/shared")}).ok());
+        write(other, QStringLiteral("shared.txt"), "mine\ntheirs\n");
+        commitAll(other, QStringLiteral("their part"));
+        QVERIFY(
+            git(other, {QStringLiteral("push"), QStringLiteral("-q"), QStringLiteral("origin"), QStringLiteral("--all")}).ok());
+        const QString theirDevelop = revOf(other, QStringLiteral("develop"));
+        const QString theirFeature = revOf(other, QStringLiteral("feature/shared"));
+        QVERIFY(git(dir, {QStringLiteral("fetch"), QStringLiteral("-q"), QStringLiteral("origin")}).ok());
+
+        // Without a remote nothing is compared; with one, both branches are brought up to date first.
+        flow::FinishOptions o;
+        const flow::Plan local = flow::planFinish(repo, c, flow::Kind::Feature, QStringLiteral("shared"), o);
+        for (const GitCommand& cmd : local.commands) QVERIFY(!cmd.args.contains(QLatin1String("--ff-only")));
+        o.remote = QStringLiteral("origin");
+        o.push = true;
+        const flow::Plan synced = flow::planFinish(repo, c, flow::Kind::Feature, QStringLiteral("shared"), o);
+        QVERIFY2(synced.ok(), qPrintable(synced.error));
+        const GitResult finished = runPlan(dir, synced);
+        QVERIFY2(finished.ok(), qPrintable(finished.message()));
+        QCOMPARE(currentBranch(dir), QStringLiteral("develop"));
+        QVERIFY(contains(dir, QStringLiteral("develop"), theirDevelop));
+        QVERIFY(contains(dir, QStringLiteral("develop"), theirFeature));
+        QCOMPARE(parentCount(dir, QStringLiteral("develop")), 2);
+        QVERIFY(synced.pushArgs.contains(QStringLiteral(":refs/heads/feature/shared")));
+        const GitResult pushed = git(dir, synced.pushArgs);
+        QVERIFY2(pushed.ok(), qPrintable(pushed.message()));
+        QCOMPARE(revOf(remote, QStringLiteral("develop")), revOf(dir, QStringLiteral("develop")));
+
+        // Diverged: local and remote develop both have new commits.
+        QVERIFY(runPlan(dir, flow::planStart(repo, c, flow::Kind::Feature, QStringLiteral("late"))).ok());
+        write(dir, QStringLiteral("late.txt"), "late\n");
+        commitAll(dir, QStringLiteral("late feature"));
+        QVERIFY(git(dir, {QStringLiteral("checkout"), QStringLiteral("-q"), QStringLiteral("develop")}).ok());
+        write(dir, QStringLiteral("local.txt"), "local\n");
+        commitAll(dir, QStringLiteral("local develop work"));
+        QVERIFY(git(other, {QStringLiteral("checkout"), QStringLiteral("-q"), QStringLiteral("develop")}).ok());
+        QVERIFY(git(other, {QStringLiteral("pull"), QStringLiteral("-q"), QStringLiteral("--ff-only")}).ok());
+        write(other, QStringLiteral("more.txt"), "more\n");
+        commitAll(other, QStringLiteral("more of their work"));
+        QVERIFY(
+            git(other, {QStringLiteral("push"), QStringLiteral("-q"), QStringLiteral("origin"), QStringLiteral("develop")}).ok());
+        QVERIFY(git(dir, {QStringLiteral("fetch"), QStringLiteral("-q"), QStringLiteral("origin")}).ok());
+        const flow::Plan diverged = flow::planFinish(repo, c, flow::Kind::Feature, QStringLiteral("late"), o);
+        QVERIFY(diverged.error.contains(QLatin1String("diverged")));
+        QVERIFY(diverged.error.contains(QLatin1String("develop")));
     }
 
     void gitFlowSettings() {

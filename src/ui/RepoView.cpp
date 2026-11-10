@@ -58,6 +58,7 @@ QString flowStartTitle(flow::Kind kind) {
         case flow::Kind::Bugfix: return RepoView::tr("Start Bugfix");
         case flow::Kind::Release: return RepoView::tr("Start Release");
         case flow::Kind::Hotfix: return RepoView::tr("Start Hotfix");
+        case flow::Kind::Support: return RepoView::tr("Start Support Branch");
     }
     return {};
 }
@@ -68,6 +69,7 @@ QString flowFinishTitle(flow::Kind kind) {
         case flow::Kind::Bugfix: return RepoView::tr("Finish Bugfix");
         case flow::Kind::Release: return RepoView::tr("Finish Release");
         case flow::Kind::Hotfix: return RepoView::tr("Finish Hotfix");
+        case flow::Kind::Support: break;  // support branches are not finished
     }
     return {};
 }
@@ -78,6 +80,7 @@ QString flowFinishLabel(flow::Kind kind, const QString& name) {
         case flow::Kind::Bugfix: return RepoView::tr("Finish Bugfix '%1'…").arg(name);
         case flow::Kind::Release: return RepoView::tr("Finish Release %1…").arg(name);
         case flow::Kind::Hotfix: return RepoView::tr("Finish Hotfix %1…").arg(name);
+        case flow::Kind::Support: break;
     }
     return {};
 }
@@ -431,8 +434,13 @@ void RepoView::onSidebarMenu(const SidebarEntry& e, const QPoint& pos) {
             flow::Kind flowKind = flow::Kind::Feature;
             QString flowName;
             if (m_snapshot.gitFlow.classify(r.name, &flowKind, &flowName)) {
-                menu.addAction(theme::actionIcon(QStringLiteral("flag-check")), flowFinishLabel(flowKind, flowName), this,
-                               [this, flowKind, flowName] { gitFlowFinish(flowKind, flowName); });
+                if (flow::Config::isFinishable(flowKind)) {
+                    menu.addAction(theme::actionIcon(QStringLiteral("flag-check")), flowFinishLabel(flowKind, flowName), this,
+                                   [this, flowKind, flowName] { gitFlowFinish(flowKind, flowName); });
+                } else {
+                    menu.addAction(theme::actionIcon(QStringLiteral("player-play")), tr("Start Hotfix on '%1'…").arg(r.name),
+                                   this, [this, r] { gitFlowStart(flow::Kind::Hotfix, r.name); });
+                }
                 menu.addSeparator();
             }
             menu.addAction(theme::actionIcon(QStringLiteral("git-branch")), tr("Checkout"), this, [this, r] { checkout(r.name); })
@@ -653,7 +661,8 @@ void RepoView::populateGitFlowMenu(QMenu* menu) {
     for (const Ref& r : m_snapshot.refs) {
         flow::Kind kind = flow::Kind::Feature;
         QString name;
-        if (r.kind == RefKind::LocalBranch && c.classify(r.name, &kind, &name)) open.push_back({!r.isHead, kind, name});
+        if (r.kind == RefKind::LocalBranch && c.classify(r.name, &kind, &name) && flow::Config::isFinishable(kind))
+            open.push_back({!r.isHead, kind, name});
     }
     std::stable_sort(open.begin(), open.end(), [](const auto& x, const auto& y) { return std::get<0>(x) < std::get<0>(y); });
     if (!open.isEmpty()) menu->addSeparator();
@@ -697,9 +706,10 @@ void RepoView::gitFlowSetup() {
     dlg.addLine(QStringLiteral("bugfix"), tr("Bugfix prefix:"), current.bugfixPrefix);
     dlg.addLine(QStringLiteral("release"), tr("Release prefix:"), current.releasePrefix);
     dlg.addLine(QStringLiteral("hotfix"), tr("Hotfix prefix:"), current.hotfixPrefix);
+    dlg.addLine(QStringLiteral("support"), tr("Support prefix:"), current.supportPrefix);
     dlg.addLine(QStringLiteral("tag"), tr("Version tag prefix:"), current.versionTagPrefix, tr("none, or e.g. v"));
     dlg.setValidator([&dlg] {
-        for (const char* key : {"production", "develop", "feature", "bugfix", "release", "hotfix"}) {
+        for (const char* key : {"production", "develop", "feature", "bugfix", "release", "hotfix", "support"}) {
             if (dlg.text(QLatin1String(key)).isEmpty()) return false;
         }
         return true;
@@ -713,6 +723,7 @@ void RepoView::gitFlowSetup() {
     c.bugfixPrefix = dlg.text(QStringLiteral("bugfix"));
     c.releasePrefix = dlg.text(QStringLiteral("release"));
     c.hotfixPrefix = dlg.text(QStringLiteral("hotfix"));
+    c.supportPrefix = dlg.text(QStringLiteral("support"));
     c.versionTagPrefix = dlg.text(QStringLiteral("tag"));
     const Repository repo = m_repo;
     const QString remote = defaultRemote();
@@ -738,7 +749,7 @@ void RepoView::gitFlowRemove() {
         runCommands(tr("Remove Git Flow Settings"), plan.commands);
 }
 
-void RepoView::gitFlowStart(flow::Kind kind) {
+void RepoView::gitFlowStart(flow::Kind kind, const QString& startBase) {
     const flow::Config c = m_snapshot.gitFlow;
     if (!c.isInitialized()) {
         gitFlowSetup();
@@ -753,17 +764,41 @@ void RepoView::gitFlowStart(flow::Kind kind) {
         else
             branches << r.name;
     }
+    QStringList bases = branches;
+    QString base = startBase;
+    if (kind == flow::Kind::Support) {
+        // Something already released: a version tag, newest first, or a production commit.
+        bases = flow::versionTags(tags, c.versionTagPrefix) + QStringList{c.production};
+        if (base.isEmpty()) base = bases.first();
+    } else if (base.isEmpty()) {
+        base = kind == flow::Kind::Hotfix ? c.production : c.develop;
+    }
+    const Repository repo = m_repo;
+    // A hotfix of a support branch continues that branch's versions, not the newest release's.
+    auto suggestion = [repo, c, kind, tags](const QString& from) {
+        if (!flow::Config::isVersioned(kind)) return QString();
+        const bool support = kind == flow::Kind::Hotfix && from.startsWith(c.supportPrefix);
+        return flow::suggestVersion(support ? flow::tagsReachableFrom(repo, from) : tags, c.versionTagPrefix, kind);
+    };
+
     const QString prefix = c.prefix(kind);
     const QString title = flowStartTitle(kind);
     FormDialog dlg(this, title, tr("Start"));
-    QLineEdit* name = dlg.addLine(QStringLiteral("name"), versioned ? tr("Version:") : tr("Name:"),
-                                  versioned ? flow::suggestVersion(tags, c.versionTagPrefix, kind) : QString(),
-                                  versioned ? tr("e.g. 1.4.0") : tr("e.g. login-form"));
+    if (kind == flow::Kind::Support) {
+        dlg.addNote(
+            tr("A support branch keeps an older release line alive. It starts from a release and is never "
+               "finished; start hotfixes on it to publish fixes for that line."));
+    }
+    QLineEdit* name = dlg.addLine(QStringLiteral("name"), versioned || kind == flow::Kind::Support ? tr("Version:") : tr("Name:"),
+                                  suggestion(base),
+                                  versioned                     ? tr("e.g. 1.4.0")
+                                  : kind == flow::Kind::Support ? tr("e.g. 1.x")
+                                                                : tr("e.g. login-form"));
     auto* preview = new QLabel;
     preview->setTextFormat(Qt::RichText);
     preview->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     dlg.addWidgetRow(tr("Branch:"), preview);
-    dlg.addCombo(QStringLiteral("base"), tr("Based on:"), branches, kind == flow::Kind::Hotfix ? c.production : c.develop, true);
+    QComboBox* baseBox = dlg.addCombo(QStringLiteral("base"), tr("Based on:"), bases, base, true);
     auto updatePreview = [=] {
         const QString n = name->text().trimmed();
         QString text = b(prefix + (n.isEmpty() ? QStringLiteral("…") : n));
@@ -773,6 +808,11 @@ void RepoView::gitFlowStart(flow::Kind kind) {
     };
     updatePreview();
     connect(name, &QLineEdit::textChanged, preview, updatePreview);
+    if (versioned) {
+        connect(baseBox, &QComboBox::currentTextChanged, name, [name, suggestion](const QString& from) {
+            if (!name->isModified()) name->setText(suggestion(from.trimmed()));
+        });
+    }
     dlg.setValidator([name] {
         const QString n = name->text().trimmed();
         return !n.isEmpty() && !n.contains(QLatin1Char(' '));
@@ -780,11 +820,10 @@ void RepoView::gitFlowStart(flow::Kind kind) {
     name->selectAll();
     if (dlg.exec() != QDialog::Accepted) return;
 
-    const Repository repo = m_repo;
     const QString n = dlg.text(QStringLiteral("name"));
-    const QString base = dlg.text(QStringLiteral("base"));
+    const QString chosenBase = dlg.text(QStringLiteral("base"));
     runAsync(
-        this, [repo, c, kind, n, base] { return flow::planStart(repo, c, kind, n, base); },
+        this, [repo, c, kind, n, chosenBase] { return flow::planStart(repo, c, kind, n, chosenBase); },
         [this, title](const flow::Plan& plan) {
             if (!plan.ok())
                 showError(this, title, plan.error);
@@ -795,35 +834,42 @@ void RepoView::gitFlowStart(flow::Kind kind) {
 
 void RepoView::gitFlowFinish(flow::Kind kind, const QString& name) {
     const flow::Config c = m_snapshot.gitFlow;
-    if (!c.isInitialized()) return;
+    if (!c.isInitialized() || !flow::Config::isFinishable(kind)) return;
     const bool versioned = flow::Config::isVersioned(kind);
     const QString branch = c.prefix(kind) + name;
     const QString tag = c.versionTagPrefix + name;
     const QString title = flowFinishTitle(kind);
+    QStringList locals;
+    for (const Ref& r : m_snapshot.refs) {
+        if (r.kind == RefKind::LocalBranch) locals << r.name;
+    }
+    const flow::Targets targets = flow::finishTargets(c, kind, name, locals);
 
     FormDialog dlg(this, title, tr("Finish"));
     if (!versioned) {
-        dlg.addNote(tr("Merges %1 into %2, then deletes it.").arg(b(branch), b(c.develop)));
+        dlg.addNote(tr("Merges %1 into %2, then deletes it.").arg(b(branch), b(targets.into)));
         dlg.addCheck(QStringLiteral("squash"), tr("Squash into a single commit"));
         dlg.addCheck(QStringLiteral("noff"), tr("Always create a merge commit"));
     } else {
-        QString back = c.develop;
-        if (kind == flow::Kind::Hotfix) {
-            for (const Ref& r : m_snapshot.refs) {
-                if (r.kind == RefKind::LocalBranch && r.name.startsWith(c.releasePrefix) &&
-                    r.name.size() > c.releasePrefix.size())
-                    back = r.name;
-            }
+        if (targets.back.isEmpty()) {
+            dlg.addNote(tr("Merges %1 into %2 and tags it %3, then deletes it.").arg(b(branch), b(targets.into), b(tag)));
+        } else {
+            dlg.addNote(tr("Merges %1 into %2, tags it %3, merges it into %4, then deletes it.")
+                            .arg(b(branch), b(targets.into), b(tag), b(targets.back)));
         }
-        dlg.addNote(tr("Merges %1 into %2, tags it %3, merges it into %4, then deletes it.")
-                        .arg(b(branch), b(c.production), b(tag), b(back)));
         QCheckBox* tagBox = dlg.addCheck(QStringLiteral("tag"), tr("Create the tag %1").arg(tag), true);
         QLineEdit* message = dlg.addLine(QStringLiteral("message"), tr("Tag message:"), tag);
         connect(tagBox, &QCheckBox::toggled, message, &QWidget::setEnabled);
     }
     dlg.addCheck(QStringLiteral("keep"), tr("Keep the branch"));
     const QString remote = defaultRemote();
-    if (!remote.isEmpty()) dlg.addCheck(QStringLiteral("push"), tr("Push the result to %1").arg(remote));
+    if (!remote.isEmpty()) {
+        QSettings settings;
+        dlg.addCheck(QStringLiteral("fetch"), tr("Fetch from %1 first").arg(remote),
+                     settings.value(QStringLiteral("gitFlow/fetchBeforeFinish"), true).toBool())
+            ->setToolTip(tr("Branches that are behind their copy on %1 are fast-forwarded before merging.").arg(remote));
+        dlg.addCheck(QStringLiteral("push"), tr("Push the result to %1").arg(remote));
+    }
     if (dlg.exec() != QDialog::Accepted) return;
     if (!m_changes->ensureIdentity()) return;
 
@@ -833,24 +879,37 @@ void RepoView::gitFlowFinish(flow::Kind kind, const QString& name) {
     o.tag = versioned && dlg.checked(QStringLiteral("tag"));
     o.tagMessage = versioned ? dlg.text(QStringLiteral("message")) : QString();
     o.keepBranch = dlg.checked(QStringLiteral("keep"));
-    o.remote = !remote.isEmpty() && dlg.checked(QStringLiteral("push")) ? remote : QString();
+    o.remote = remote;
+    o.push = !remote.isEmpty() && dlg.checked(QStringLiteral("push"));
+    const bool fetch = !remote.isEmpty() && dlg.checked(QStringLiteral("fetch"));
+    if (!remote.isEmpty()) QSettings().setValue(QStringLiteral("gitFlow/fetchBeforeFinish"), fetch);
+
     const Repository repo = m_repo;
-    runAsync(
-        this, [repo, c, kind, name, o] { return flow::planFinish(repo, c, kind, name, o); },
-        [this, title](const flow::Plan& plan) {
-            if (!plan.ok()) {
-                showError(this, title, plan.error);
-                return;
-            }
-            const QStringList push = plan.pushArgs;
-            runCommands(
-                title, plan.commands,
-                [this, push](bool ok) {
-                    if (ok && !push.isEmpty()) runNetwork(tr("Push"), push);
-                },
-                tr("If git stopped at a merge conflict, resolve it in Local Changes and commit the merge, then "
-                   "choose Finish again: the steps that are already done are skipped."));
+    auto finish = [this, repo, c, kind, name, o, title] {
+        runAsync(
+            this, [repo, c, kind, name, o] { return flow::planFinish(repo, c, kind, name, o); },
+            [this, title](const flow::Plan& plan) {
+                if (!plan.ok()) {
+                    showError(this, title, plan.error);
+                    return;
+                }
+                const QStringList push = plan.pushArgs;
+                runCommands(
+                    title, plan.commands,
+                    [this, push](bool ok) {
+                        if (ok && !push.isEmpty()) runNetwork(tr("Push"), push);
+                    },
+                    tr("If git stopped at a merge conflict, resolve it in Local Changes and commit the merge, then "
+                       "choose Finish again: the steps that are already done are skipped."));
+            });
+    };
+    if (fetch) {
+        runNetwork(tr("Fetch"), {QStringLiteral("fetch"), QStringLiteral("--progress"), remote}, [finish](bool ok) {
+            if (ok) finish();
         });
+    } else {
+        finish();
+    }
 }
 
 // ---------------------------------------------------------------- file history and blame
