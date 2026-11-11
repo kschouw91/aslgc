@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: MIT
 # Builds the release packages and publishes them as a GitHub release when a version tag
 # (1.2.3 or v1.2.3) is pushed; git-flow's release and hotfix finish create that tag on main.
-# Before finishing a release, set its version with tools/set-version.sh; this workflow stops if
-# the tag, CMakeLists.txt, CHANGELOG.md and the AppStream metainfo disagree.
-# Run it by hand (Actions → release → Run workflow) to build the packages without publishing them.
+# Pushing a release/<version> or hotfix/<version> branch builds the same packages without
+# publishing them, as a dry run before finishing.
+# Set the version with tools/set-version.sh on the release branch; this workflow stops if the
+# tag or branch, CMakeLists.txt, CHANGELOG.md and the AppStream metainfo disagree.
 name: release
 
 on:
   push:
+    branches: ['release/**', 'hotfix/**']
     tags: ['[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+']
   workflow_dispatch:
 
@@ -24,8 +26,12 @@ jobs:
       - name: Check version
         id: version
         run: |
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
-            version="${GITHUB_REF_NAME#v}"
+          case "$GITHUB_REF_TYPE/$GITHUB_REF_NAME" in
+            tag/*) version="${GITHUB_REF_NAME#v}" ;;
+            branch/release/* | branch/hotfix/*) version="${GITHUB_REF_NAME#*/}"; version="${version#v}" ;;
+            *) version="" ;;
+          esac
+          if [ -n "$version" ]; then
             tools/set-version.sh "$version" --check
           else
             version="$(sed -n 's/^project(aslgc VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"

@@ -114,14 +114,16 @@ Releases follow git-flow: `develop` → `release/<version>` → `main`, with the
    (or `## [<version>] — unreleased`), then run `tools/set-version.sh <version>`. It sets the
    version in `CMakeLists.txt`, dates the CHANGELOG entry and adds the release to the AppStream
    metadata. Commit that.
-3. Finish the release (merge into `main` and back into `develop`, tag), then push `main`,
+3. Push the release branch and wait for the release workflow's dry run to pass.
+4. Finish the release (merge into `main` and back into `develop`, tag), then push `main`,
    `develop` and the tag.
 
 Pushing the tag runs `.github/workflows/release.yml`: it checks the version with
 `tools/set-version.sh <version> --check`, builds the `.deb` (Ubuntu 24.04, Debian 13), `.rpm`
 (Fedora), AppImage and Flatpak bundle, installs or starts each one, and publishes them with the
-CHANGELOG notes as a GitHub release. To try the packaging without releasing, run the workflow by
-hand from the Actions tab; the packages are then only kept as workflow artifacts.
+CHANGELOG notes as a GitHub release. Pushing the `release/<version>` (or `hotfix/<version>`) branch
+before finishing runs the same checks and builds as a dry run; its packages are only kept as
+workflow artifacts.
 
 Afterwards, start a new `## [Unreleased]` section at the top of `CHANGELOG.md` on `develop`.
 

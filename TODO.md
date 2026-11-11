@@ -155,7 +155,7 @@ Legend: `[x]` done · `[ ]` to do · size **S** < 1 day, **M** 1–3 days, **L**
 ## Needs verification
 - [x] First CI run on all four distros: Arch, Fedora, Debian 13 and Ubuntu 24.04 with Qt 6.4 all pass
 - [x] `packaging/arch/PKGBUILD` builds with `makepkg` from the pushed repository (check() runs the tests)
-- [ ] First run of the release workflow (run it by hand from the Actions tab before the first tag): `.deb` / `.rpm` packaging, AppImage on Ubuntu 24.04, Flatpak build on the runner
+- [ ] First run of the release workflow (the dry run on `release/0.1.0`): `.deb` / `.rpm` packaging, AppImage on Ubuntu 24.04, Flatpak build on the runner
 - [ ] Flatpak by hand: Open in Terminal and Open in Merge Tool on the host, keyring sign-in, SSH and signed commits
 - [ ] Real GitHub and GitLab sign-in: repository picker, pull/merge request creation, token-based HTTPS push (so far only checked against the live APIs with an invalid token)
 - [ ] GitHub browser sign-in end to end (needs the registered OAuth App Client ID)
