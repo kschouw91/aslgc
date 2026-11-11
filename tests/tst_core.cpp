@@ -335,6 +335,119 @@ private slots:
         QVERIFY(repo.trackedFiles().contains(QStringLiteral("a*.txt")));
     }
 
+    void fileLogBranchesAndUncommitted() {
+        const QString dir = newRepo();
+        write(dir, QStringLiteral("f.txt"), "1\n");
+        QDir(dir).mkpath(QStringLiteral("d"));
+        write(dir, QStringLiteral("d/x.txt"), "x\n");
+        commitAll(dir, QStringLiteral("m1"));
+        QVERIFY(git(dir, {QStringLiteral("checkout"), QStringLiteral("-q"), QStringLiteral("-b"), QStringLiteral("topic")}).ok());
+        write(dir, QStringLiteral("f.txt"), "topic\n");
+        commitAll(dir, QStringLiteral("t1"));
+        QVERIFY(git(dir, {QStringLiteral("checkout"), QStringLiteral("-q"), QStringLiteral("main")}).ok());
+        write(dir, QStringLiteral("f.txt"), "2\n");
+        commitAll(dir, QStringLiteral("m2"));
+        const Repository repo(dir);
+        auto subjects = [](const QVector<FileLogEntry>& log) {
+            QStringList out;
+            for (const FileLogEntry& e : log) out << e.commit.subject;
+            out.sort();
+            return out;
+        };
+        QCOMPARE(subjects(repo.fileLog(QStringLiteral("f.txt"), false)),
+                 (QStringList{QStringLiteral("m1"), QStringLiteral("m2")}));
+        QCOMPARE(subjects(repo.fileLog(QStringLiteral("f.txt"), false, 100, {QStringLiteral("refs/heads/topic")})),
+                 (QStringList{QStringLiteral("m1"), QStringLiteral("t1")}));
+        QCOMPARE(subjects(repo.fileLog(QStringLiteral("f.txt"), false, 100, {QStringLiteral("--branches")})),
+                 (QStringList{QStringLiteral("m1"), QStringLiteral("m2"), QStringLiteral("t1")}));
+        QCOMPARE(subjects(repo.fileLog(QStringLiteral("d"), true, 100, {QStringLiteral("refs/heads/topic")})),
+                 QStringList{QStringLiteral("m1")});
+
+        auto describe = [](const QVector<FileChange>& changes) {
+            QStringList out;
+            for (const FileChange& f : changes) out << QStringLiteral("%1 %2").arg(QChar::fromLatin1(f.status), f.path);
+            return out;
+        };
+        QVERIFY(repo.uncommittedChanges(QStringLiteral("f.txt"), false).isEmpty());
+        QVERIFY(repo.uncommittedChanges(QString(), true).isEmpty());
+        write(dir, QStringLiteral("f.txt"), "3\n");
+        write(dir, QStringLiteral("d/x.txt"), "staged\n");
+        QVERIFY(git(dir, {QStringLiteral("add"), QStringLiteral("d/x.txt")}).ok());
+        write(dir, QStringLiteral("d/x.txt"), "staged and more\n");
+        write(dir, QStringLiteral("d/new file.txt"), "n\n");
+        write(dir, QStringLiteral("other.txt"), "o\n");
+        write(dir, QStringLiteral(".gitignore"), "*.log\n");
+        write(dir, QStringLiteral("d/ignored.log"), "i\n");
+        QCOMPARE(describe(repo.uncommittedChanges(QStringLiteral("f.txt"), false)), QStringList{QStringLiteral("M f.txt")});
+        QCOMPARE(describe(repo.uncommittedChanges(QStringLiteral("d"), true)),
+                 (QStringList{QStringLiteral("M d/x.txt"), QStringLiteral("? d/new file.txt")}));
+        QCOMPARE(describe(repo.uncommittedChanges(QString(), true)),
+                 (QStringList{QStringLiteral("M d/x.txt"), QStringLiteral("M f.txt"), QStringLiteral("? .gitignore"),
+                              QStringLiteral("? d/new file.txt"), QStringLiteral("? other.txt")}));
+        // Staged and unstaged changes together: the diff against HEAD.
+        const FileDiff both =
+            onlyDiff(repo.compareDiff(QStringLiteral("HEAD"), {}, {QStringLiteral("d/x.txt"), {}, 'M', {}, false}));
+        QCOMPARE(both.hunks.size(), 1);
+        QVERIFY(lineIndex(both.hunks.first(), '+', "staged and more") >= 0);
+    }
+
+    void blameOptions() {
+        const QString dir = newRepo();
+        const QByteArray block =
+            "alpha block line one with plenty of characters to recognise\n"
+            "alpha block line two with plenty of characters to recognise\n";
+        const QByteArray borrowed =
+            "borrowed text first line that is long enough to be detected\n"
+            "borrowed text second line that is long enough to be detected\n";
+        const QByteArray middle = numbered(8, QStringLiteral("    middle"));
+        write(dir, QStringLiteral("a.txt"), block + middle);
+        write(dir, QStringLiteral("b.txt"), "keep\n" + borrowed);
+        commitAll(dir, QStringLiteral("base"));
+        write(dir, QStringLiteral("a.txt"), middle + block);  // move the block to the end
+        commitAll(dir, QStringLiteral("move"));
+        QByteArray reindented = middle;
+        reindented.replace("    middle 4\n", "\t middle 4\n");
+        write(dir, QStringLiteral("a.txt"), reindented + block);
+        commitAll(dir, QStringLiteral("reindent"));
+        write(dir, QStringLiteral("a.txt"), reindented + block + borrowed);  // move lines over from b.txt
+        write(dir, QStringLiteral("b.txt"), "keep\n");
+        commitAll(dir, QStringLiteral("borrow"));
+        const Repository repo(dir);
+
+        auto origin = [](const Blame& b, const QString& text, QString* path = nullptr) {
+            for (const BlameLine& l : b.lines) {
+                if (l.text.contains(text)) {
+                    if (path) *path = l.path;
+                    return b.commits[l.commit].summary;
+                }
+            }
+            return QStringLiteral("not found");
+        };
+        const QString file = QStringLiteral("a.txt");
+        const Blame plain = repo.blame(file);
+        QVERIFY2(plain.ok(), qPrintable(plain.error));
+        QCOMPARE(origin(plain, QStringLiteral("alpha block line one")), QStringLiteral("move"));
+        QCOMPARE(origin(plain, QStringLiteral("middle 4")), QStringLiteral("reindent"));
+        QCOMPARE(origin(plain, QStringLiteral("borrowed text first")), QStringLiteral("borrow"));
+
+        BlameOptions o;
+        o.ignoreWhitespace = true;
+        QCOMPARE(origin(repo.blame(file, {}, o), QStringLiteral("middle 4")), QStringLiteral("base"));
+        o = {};
+        o.detectMoves = true;
+        const Blame moved = repo.blame(file, {}, o);
+        QCOMPARE(origin(moved, QStringLiteral("alpha block line one")), QStringLiteral("base"));
+        QCOMPARE(origin(moved, QStringLiteral("alpha block line two")), QStringLiteral("base"));
+        QCOMPARE(origin(moved, QStringLiteral("borrowed text first")), QStringLiteral("borrow"));
+        o.detectCopies = true;
+        QString from;
+        const Blame copied = repo.blame(file, QStringLiteral("HEAD"), o);
+        QCOMPARE(origin(copied, QStringLiteral("borrowed text second"), &from), QStringLiteral("base"));
+        QCOMPARE(from, QStringLiteral("b.txt"));
+        QCOMPARE(origin(copied, QStringLiteral("alpha block line one"), &from), QStringLiteral("base"));
+        QCOMPARE(from, QStringLiteral("a.txt"));
+    }
+
     void blameAttribution() {
         const QString dir = newRepo();
         write(dir, QStringLiteral("a b.txt"), numbered(10));

@@ -287,8 +287,11 @@ Blame blame(const QByteArray& data) {
                 b.commits.push_back(std::move(c));
             }
             current = it.value();
-            origLine = value.left(value.indexOf(' ')).toInt();
-            path = b.commits[current].path;
+            const QList<QByteArray> numbers = value.split(' ');  // orig line, final line[, group size]
+            origLine = numbers.value(0).toInt();
+            // A new group starts with the commit's file unless a "filename" line follows; the
+            // rest of a group keeps the group's file (with -C, a commit can have several).
+            if (numbers.size() >= 3) path = b.commits[current].path;
             continue;
         }
         if (current < 0) continue;

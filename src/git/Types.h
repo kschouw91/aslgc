@@ -124,6 +124,12 @@ struct Blame {
     bool ok() const { return error.isEmpty(); }
 };
 
+struct BlameOptions {
+    bool ignoreWhitespace = false;  // -w
+    bool detectMoves = false;       // -M: lines moved or copied within the file keep their origin
+    bool detectCopies = false;      // -C: also lines from other files changed in the same commit
+};
+
 struct HeadInfo {
     QString branch;  // empty when detached
     QString sha;     // empty when unborn

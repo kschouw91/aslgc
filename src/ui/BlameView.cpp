@@ -313,7 +313,7 @@ bool BlameView::gutterToolTip(const QPoint& pos, const QPoint& globalPos) {
         html = QStringLiteral("<b>%1</b><br>%2 &lt;%3&gt;<br>%4<br><code>%5</code>")
                    .arg(c->summary.toHtmlEscaped(), c->authorName.toHtmlEscaped(), c->authorEmail.toHtmlEscaped(), when, c->sha);
         const QString path = m_blame.lines[line].path;
-        if (!path.isEmpty() && path != m_path) html += QStringLiteral("<br>") + tr("File was named %1").arg(path.toHtmlEscaped());
+        if (!path.isEmpty() && path != m_path) html += QStringLiteral("<br>") + tr("In %1 at the time").arg(path.toHtmlEscaped());
         html += QStringLiteral("<br><i>%1</i>").arg(tr("Click to show this commit"));
     }
     QToolTip::showText(globalPos, html, m_gutter);

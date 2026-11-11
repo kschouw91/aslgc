@@ -66,8 +66,8 @@ Legend: `[x]` done · `[ ]` to do · size **S** < 1 day, **M** 1–3 days, **L**
 - [ ] Interactive rebase: edit the combined message of a squash group in the dialog; keep merges (`--rebase-merges`) — M
 - [x] File history (follows renames), also for folders: own window per path, breadcrumb to parent folders, View → File History… (Ctrl+Shift+H) or a file's context menu
 - [x] Blame view: age-coloured annotations, click through to the commit, blame the previous revision, back navigation, uncommitted lines marked
-- [ ] Blame options: ignore whitespace, detect moved / copied lines (`-w -M -C`) — S
-- [ ] File history: show uncommitted changes as the first row; pick another branch than HEAD — S
+- [x] Blame options: ignore whitespace, detect lines moved within the file or copied from other files (`-w -M -C`), remembered
+- [x] File history: uncommitted changes (staged, unstaged, untracked) as the first row; follow the current branch, any local or remote branch, or all branches
 - [x] History of selected lines (`git log -L`): from the blame view or any commit diff; follows renames; working tree lines are matched to HEAD's
 - [x] Compare commits: select two to see their differences, three or more (or "include the oldest") for their combined changes; compare any commit with the working tree; save either as a patch
 - [ ] File tree at a revision: browse, open, save a file as of that commit — M

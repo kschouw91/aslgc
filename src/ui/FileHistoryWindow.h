@@ -7,7 +7,9 @@
 #include <QWidget>
 #include <optional>
 
+class QAction;
 class QButtonGroup;
+class QComboBox;
 class QFrame;
 class QLabel;
 class QMenu;
@@ -16,6 +18,7 @@ class QStackedWidget;
 class QTextBrowser;
 class QToolButton;
 class QTreeWidget;
+class QTreeWidgetItem;
 
 namespace aslgc {
 
@@ -26,6 +29,8 @@ class RepoView;
 
 // A window with the history of one file (following renames) or folder, and the blame of a file.
 // The path is shown as a breadcrumb: clicking a folder in it switches to that folder's history.
+// The history follows the current branch, another branch or all of them; on the current branch,
+// changes that are not committed yet come first.
 class FileHistoryWindow : public QWidget {
     Q_OBJECT
 public:
@@ -66,8 +71,14 @@ private:
 
     void setTarget(const QString& path, bool folder);
     void updateTitle();
+    // Refills the branch choice; returns true when the chosen branch is gone (back to the current one).
+    bool updateBranchChoices();
+    void chooseBranch(int index);
+    bool isAllBranches() const;
+    QString historyTip() const;  // changes whenever the history being shown could have changed
     void loadHistory(const QString& selectSha);
     void populateList(const QString& selectSha);
+    QTreeWidgetItem* entryItem(int index) const;  // the list row of m_entries[index]
     int entryIndex(const QString& sha) const;
     void selectEntry(const QString& sha);
     // Shows `sha` on the history page; commits outside this history are shown on their own.
@@ -78,11 +89,19 @@ private:
     void showListMenu(const QPoint& pos);
     void onHeaderLink(const QUrl& url);
     int currentEntry() const;  // index into m_entries, -1 when none is selected
+    bool showsUncommitted() const;
+    QTreeWidgetItem* uncommittedItem() const;
+    void fillUncommittedItem(QTreeWidgetItem* item) const;
+    void loadUncommitted();
+    void applyUncommitted(const QVector<FileChange>& changes);
+    void showUncommitted();
     void requestLineHistory(int first, int last, bool oldSide);
     void clearLineHistory();
     void updateLineBanner();
 
     void showDefaultBlame();
+    BlameOptions blameOptions() const;
+    void blameOptionsChanged();
     void loadBlame(const BlameTarget& target, bool remember, bool quiet = false);
     void blameBack();
     void updateBlameBar();
@@ -97,10 +116,15 @@ private:
     std::optional<LineRange> m_lines;  // set while showing the history of a range of lines
     QVector<FileDiff> m_lineDiffs;     // per entry, while m_lines is set
     QString m_lineError;
-    QString m_loadedHead;
+    QStringList m_revs;  // what the history walks (git log revisions); empty: HEAD
+    QString m_loadedTip;
+    QVector<FileChange> m_uncommitted;  // shown first while the history follows HEAD
+    bool m_uncommittedSelected = false;
+    QByteArray m_uncommittedDiff;  // last diff shown for the uncommitted row, to skip unchanged reloads
 
     QLabel* m_breadcrumb;
     QLabel* m_count;
+    QComboBox* m_branch;
     QButtonGroup* m_pages;
     QToolButton* m_historyButton;
     QToolButton* m_blameButton;
@@ -122,6 +146,10 @@ private:
     QWidget* m_blamePage;
     QToolButton* m_back;
     QLabel* m_blameLabel;
+    QToolButton* m_blameOptionsButton;
+    QAction* m_blameWhitespace;
+    QAction* m_blameMoves;
+    QAction* m_blameCopies;
     BlameView* m_blame;
     BlameTarget m_blameTarget;
     QVector<BlameTarget> m_blameHistory;
@@ -129,6 +157,7 @@ private:
     QDateTime m_blameFileTime;  // working tree file's modification time when blamed
 
     int m_historyGen = 0;
+    int m_uncommittedGen = 0;
     int m_detailsGen = 0;
     int m_diffGen = 0;
     int m_blameGen = 0;

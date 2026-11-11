@@ -25,6 +25,8 @@ First public release.
   settings as the git-flow command line tool.
 - File history for any file (following renames) or folder, and a blame view that clicks through to
   each commit and steps back through earlier revisions (View → File History…, or a file's context menu).
+  The history can follow another branch or all branches and lists uncommitted changes first; blame
+  can ignore whitespace and detect lines moved within the file or copied from other files.
 - Commit comparison: select two commits for their differences or a range for its combined changes, compare
   any commit with the working tree, and save a comparison or the selected commits as patches.
 - History of selected lines: select lines in the blame view or a commit diff to list the commits that

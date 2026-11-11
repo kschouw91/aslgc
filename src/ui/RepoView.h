@@ -60,6 +60,8 @@ public:
     void openTerminal();
     void openFolder();
     void showChanges();
+    // Shows Local Changes and brings this tab and its window to the front.
+    void revealChanges();
     void showHistory();
     void findCommit();
 

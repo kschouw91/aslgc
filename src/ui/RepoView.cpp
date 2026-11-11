@@ -379,6 +379,11 @@ void RepoView::showChanges() {
     m_changes->focusCommitMessage();
 }
 
+void RepoView::revealChanges() {
+    m_sidebar->selectChanges();
+    emit activateRequested();
+}
+
 void RepoView::showHistory() { m_sidebar->selectHistory(); }
 
 void RepoView::findCommit() {

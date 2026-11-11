@@ -34,6 +34,13 @@
             <numerusform>%n commits</numerusform>
         </translation>
     </message>
+    <message numerus="yes">
+        <source>Uncommitted changes in %n file(s)</source>
+        <translation>
+            <numerusform>Uncommitted changes in %n file</numerusform>
+            <numerusform>Uncommitted changes in %n files</numerusform>
+        </translation>
+    </message>
 </context>
 <context>
     <name>aslgc::HistoryView</name>

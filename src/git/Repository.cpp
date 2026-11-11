@@ -235,14 +235,15 @@ QStringList Repository::trackedFiles() const {
     return out;
 }
 
-QVector<FileLogEntry> Repository::fileLog(const QString& path, bool folder, int maxCount) const {
+QVector<FileLogEntry> Repository::fileLog(const QString& path, bool folder, int maxCount, const QStringList& revs) const {
     QStringList args{QStringLiteral("log"), QString::fromLatin1(parse::kFileLogFormat), QStringLiteral("-z"),
                      QStringLiteral("--max-count=%1").arg(maxCount)};
     if (!folder) {
         args << QStringLiteral("--follow") << QStringLiteral("-M") << QStringLiteral("--name-status")
              << QStringLiteral("--diff-merges=first-parent");
     }
-    args << QStringLiteral("HEAD") << QStringLiteral("--") << (folder ? folderPathspec(path) : literal(path));
+    args += revs.isEmpty() ? QStringList{QStringLiteral("HEAD")} : revs;
+    args << QStringLiteral("--") << (folder ? folderPathspec(path) : literal(path));
     const GitResult r = m_git.run(args);
     if (!r.ok()) return {};
     QVector<FileLogEntry> entries = parse::fileLog(r.out);
@@ -297,8 +298,27 @@ QVector<LineLogEntry> Repository::lineLog(const QString& path, int first, int la
     return parse::lineLog(r.out);
 }
 
-Blame Repository::blame(const QString& path, const QString& rev) const {
+QVector<FileChange> Repository::uncommittedChanges(const QString& path, bool folder) const {
+    const QString spec = folder ? folderPathspec(path) : literal(path);
+    const GitResult tracked =
+        m_git.run({QStringLiteral("diff"), QStringLiteral("--no-color"), QStringLiteral("-z"), QStringLiteral("-M"),
+                   QStringLiteral("--name-status"), QStringLiteral("HEAD"), QStringLiteral("--"), spec});
+    QVector<FileChange> out = tracked.ok() ? parse::nameStatus(tracked.out) : QVector<FileChange>{};
+    const GitResult untracked = m_git.run({QStringLiteral("ls-files"), QStringLiteral("-z"), QStringLiteral("--others"),
+                                           QStringLiteral("--exclude-standard"), QStringLiteral("--"), spec});
+    if (untracked.ok()) {
+        for (const QByteArray& name : untracked.out.split('\0')) {
+            if (!name.isEmpty()) out.push_back({QString::fromUtf8(name), {}, '?', {}, false});
+        }
+    }
+    return out;
+}
+
+Blame Repository::blame(const QString& path, const QString& rev, const BlameOptions& options) const {
     QStringList args{QStringLiteral("blame"), QStringLiteral("--porcelain")};
+    if (options.ignoreWhitespace) args << QStringLiteral("-w");
+    if (options.detectMoves) args << QStringLiteral("-M");
+    if (options.detectCopies) args << QStringLiteral("-C");
     if (!rev.isEmpty()) args << rev;
     args << QStringLiteral("--") << path;
     const GitResult r = m_git.run(args);

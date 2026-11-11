@@ -54,13 +54,17 @@ public:
     QString headMessage() const;
     QStringList trackedFiles() const;
 
-    // Commits on HEAD that touched `path`, newest first. A file's history follows renames and
+    // Commits that touched `path`, newest first, reachable from `revs` (git log revision
+    // arguments, e.g. a branch or "--branches"; empty: HEAD). A file's history follows renames and
     // records the file's name in each commit; a folder's history ("" = whole repository) does not.
     // Merges are compared with their first parent.
-    QVector<FileLogEntry> fileLog(const QString& path, bool folder, int maxCount = 10000) const;
+    QVector<FileLogEntry> fileLog(const QString& path, bool folder, int maxCount = 10000, const QStringList& revs = {}) const;
+    // What is not committed yet under `path` (a file, or a folder; "" = everything), compared
+    // with HEAD: staged and unstaged changes to tracked files, then untracked files ('?').
+    QVector<FileChange> uncommittedChanges(const QString& path, bool folder) const;
     // Line-by-line origin of `path` at `rev`; an empty `rev` blames the working tree file,
     // attributing uncommitted lines to the all-zero id.
-    Blame blame(const QString& path, const QString& rev = {}) const;
+    Blame blame(const QString& path, const QString& rev = {}, const BlameOptions& options = {}) const;
     // Commits that changed lines `first`..`last` (1-based) of `path` as of `rev`, newest first,
     // following renames; each with its diff limited to those lines. An empty `rev` means the
     // working tree file: the lines are translated to HEAD's version first. Sets `error` when git
