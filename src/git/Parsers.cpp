@@ -11,6 +11,7 @@ const char* const kRefFormat =
     "--format=%(refname)%1f%(objectname)%1f%(*objectname)%1f%(upstream:short)%1f%(upstream:track,nobracket)%1f%(HEAD)";
 const char* const kStashFormat = "--format=%gd%x1f%H%x1f%ct%x1f%gs%x1e";
 const char* const kFileLogFormat = "--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%s";
+const char* const kReflogFormat = "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%s%x1f%gd%x1f%gn%x1f%gs%x1e";
 
 namespace {
 
@@ -136,6 +137,37 @@ QVector<Stash> stashes(const QByteArray& data) {
         s.time = f[2].toLongLong();
         s.message = utf8(f[3]).trimmed();
         out.push_back(std::move(s));
+    }
+    return out;
+}
+
+QVector<ReflogEntry> reflog(const QByteArray& data) {
+    QVector<ReflogEntry> out;
+    for (const QByteArray& raw : data.split('\x1e')) {
+        const QByteArray rec = stripLeadingNewlines(raw);
+        if (rec.isEmpty()) continue;
+        const QList<QByteArray> f = rec.split('\x1f');
+        ReflogEntry e;
+        if (f.size() < 12 || !fillCommit(f, e.commit)) continue;
+        e.selector = utf8(f[9]);
+        e.identity = utf8(f[10]);
+        // "checkout: moving from main to dev": the command that moved the ref, then what it did.
+        const QString subject = utf8(f.mid(11).join('\x1f')).trimmed();
+        const int colon = subject.indexOf(QLatin1String(": "));
+        e.action = colon > 0 ? subject.left(colon) : subject;
+        if (colon > 0) e.message = subject.mid(colon + 2).trimmed();
+        out.push_back(std::move(e));
+    }
+    return out;
+}
+
+QVector<qint64> reflogTimes(const QByteArray& data) {
+    QVector<qint64> out;
+    for (const QByteArray& line : data.split('\n')) {
+        const int open = line.lastIndexOf('{');
+        const int close = line.lastIndexOf('}');
+        if (open < 0 || close <= open) continue;
+        out.push_back(line.mid(open + 1, close - open - 1).toLongLong());
     }
     return out;
 }

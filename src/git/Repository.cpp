@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSet>
 
 #include <algorithm>
 
@@ -128,14 +129,20 @@ QString Repository::rebaseProgress() const {
     return {};
 }
 
-QVector<Commit> Repository::log(const LogOptions& options, const HeadInfo& head, bool hasRefs) const {
-    if (head.unborn && !hasRefs) return {};
+QVector<Commit> Repository::log(const LogOptions& options, const HeadInfo& head, bool hasRefs,
+                                const QStringList& extraCommits) const {
+    if (head.unborn && !hasRefs && extraCommits.isEmpty()) return {};
     QStringList args{QStringLiteral("log"), QString::fromLatin1(parse::kLogFormat), QStringLiteral("--date-order"),
                      QStringLiteral("--max-count=%1").arg(options.maxCount)};
     if (options.allRefs) args << QStringLiteral("--branches") << QStringLiteral("--remotes") << QStringLiteral("--tags");
     if (!head.unborn) args << QStringLiteral("HEAD");
+    QByteArray input;
+    if (!extraCommits.isEmpty()) {
+        args << QStringLiteral("--stdin");  // any number of them, without hitting the command line limit
+        input = extraCommits.join(QLatin1Char('\n')).toLatin1() + '\n';
+    }
     args << QStringLiteral("--");
-    const GitResult r = m_git.run(args);
+    const GitResult r = m_git.run(args, input);
     return r.ok() ? parse::log(r.out) : QVector<Commit>{};
 }
 
@@ -335,6 +342,67 @@ QString Repository::configValue(const QString& key) const {
     return r.ok() ? r.outText().trimmed() : QString();
 }
 
+QVector<ReflogEntry> Repository::reflog(const QString& ref, int maxCount) const {
+    const QStringList walk{QStringLiteral("log"), QStringLiteral("--walk-reflogs"),
+                           QStringLiteral("--max-count=%1").arg(maxCount)};
+    QVector<ReflogEntry> entries;
+    // The entry names ("HEAD@{2}") and their times ("HEAD@{<seconds>}" with --date) take one read
+    // each; when the reflog changes in between, the two don't line up and both are read again.
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        const GitResult r = m_git.run(walk + QStringList{QString::fromLatin1(parse::kReflogFormat), ref, QStringLiteral("--")});
+        if (!r.ok()) return {};
+        const GitResult t = m_git.run(
+            walk + QStringList{QStringLiteral("--date=unix"), QStringLiteral("--format=%gd"), ref, QStringLiteral("--")});
+        entries = parse::reflog(r.out);
+        const QVector<qint64> times = parse::reflogTimes(t.out);
+        if (times.size() != entries.size()) continue;
+        for (qsizetype i = 0; i < entries.size(); ++i) entries[i].time = times[i];
+        break;
+    }
+    if (entries.isEmpty()) return entries;
+
+    // Lost commits: reachable from the reflog's commits but from no ref.
+    QStringList shas;
+    QSet<QString> seen;
+    for (const ReflogEntry& e : std::as_const(entries)) {
+        if (!seen.contains(e.commit.sha)) {
+            seen.insert(e.commit.sha);
+            shas << e.commit.sha;
+        }
+    }
+    const GitResult lost = m_git.run(
+        {QStringLiteral("rev-list"), QStringLiteral("--ignore-missing"), QStringLiteral("--stdin"), QStringLiteral("--not"),
+         QStringLiteral("--branches"), QStringLiteral("--remotes"), QStringLiteral("--tags"), QStringLiteral("HEAD")},
+        shas.join(QLatin1Char('\n')).toLatin1() + '\n');
+    if (!lost.ok()) return entries;
+    QSet<QString> lostShas;
+    for (const QByteArray& line : lost.out.split('\n')) {
+        if (!line.isEmpty()) lostShas.insert(QString::fromLatin1(line));
+    }
+    for (ReflogEntry& e : entries) e.lost = lostShas.contains(e.commit.sha);
+    return entries;
+}
+
+QVector<std::pair<QString, QString>> Repository::reflogCommits(const QStringList& refs) const {
+    if (refs.isEmpty()) return {};
+    QStringList args{QStringLiteral("log"), QStringLiteral("--walk-reflogs"), QStringLiteral("--ignore-missing"),
+                     QStringLiteral("--format=%H%x1f%gd")};
+    args << refs << QStringLiteral("--");
+    const GitResult r = m_git.run(args);
+    QVector<std::pair<QString, QString>> out;
+    if (!r.ok()) return out;
+    QSet<QString> seen;
+    for (const QByteArray& line : r.out.split('\n')) {
+        const int sep = line.indexOf('\x1f');
+        if (sep <= 0) continue;
+        const QString sha = QString::fromLatin1(line.left(sep));
+        if (seen.contains(sha)) continue;
+        seen.insert(sha);
+        out.push_back({sha, QString::fromUtf8(line.mid(sep + 1))});
+    }
+    return out;
+}
+
 QVector<GitCommand> formatPatchCommands(const QStringList& shas, const QString& dir) {
     QVector<GitCommand> out;
     for (int i = 0; i < shas.size(); ++i) {
@@ -344,6 +412,44 @@ QVector<GitCommand> formatPatchCommands(const QStringList& shas, const QString& 
     }
     return out;
 }
+
+namespace {
+
+// The commits that no ref reaches, with the reflog entry naming the newest commit of each line.
+QHash<QString, QString> reflogOnlyCommits(const QVector<Commit>& commits, const QVector<Ref>& refs, const HeadInfo& head,
+                                          const QVector<std::pair<QString, QString>>& reflogCommits) {
+    QHash<QString, int> row;
+    row.reserve(commits.size());
+    for (int i = 0; i < commits.size(); ++i) row.insert(commits[i].sha, i);
+    // Children come before their parents in the list, so one pass from the top marks everything
+    // the refs reach.
+    QVector<char> reached(commits.size(), 0);
+    auto mark = [&](const QString& sha) {
+        if (const auto it = row.constFind(sha); it != row.cend()) reached[*it] = 1;
+    };
+    for (const Ref& r : refs) mark(r.target);
+    if (!head.unborn) mark(head.sha);
+    QSet<QString> hasLostChild;
+    for (int i = 0; i < commits.size(); ++i) {
+        for (const QString& p : commits[i].parents) {
+            if (reached[i])
+                mark(p);
+            else
+                hasLostChild.insert(p);
+        }
+    }
+    QHash<QString, QString> selectors;
+    for (const auto& [sha, selector] : reflogCommits) selectors.insert(sha, selector);
+    QHash<QString, QString> out;
+    for (int i = 0; i < commits.size(); ++i) {
+        if (reached[i]) continue;
+        const QString& sha = commits[i].sha;
+        out.insert(sha, hasLostChild.contains(sha) ? QString() : selectors.value(sha));
+    }
+    return out;
+}
+
+}  // namespace
 
 RepoSnapshot loadSnapshot(const Repository& repo, const LogOptions& options, const QByteArray& previousFingerprint) {
     RepoSnapshot s;
@@ -367,10 +473,23 @@ RepoSnapshot loadSnapshot(const Repository& repo, const LogOptions& options, con
 
     s.fingerprint = refsRaw;
     s.fingerprint += '\0' + s.head.sha.toLatin1() + '\0' + s.head.branch.toUtf8() + '\0' + stashRaw;
-    s.fingerprint += QStringLiteral("\0%1:%2").arg(options.allRefs).arg(options.maxCount).toLatin1();
+    s.fingerprint += QStringLiteral("\0%1:%2:%3").arg(options.allRefs).arg(options.reflog).arg(options.maxCount).toLatin1();
 
     if (s.fingerprint != previousFingerprint) {
-        s.commits = repo.log(options, s.head, !s.refs.isEmpty());
+        QVector<std::pair<QString, QString>> reflogCommits;
+        if (options.reflog) {
+            QStringList refs;
+            if (!s.head.unborn) refs << QStringLiteral("HEAD");
+            for (const Ref& r : std::as_const(s.refs)) {
+                if (r.kind == RefKind::LocalBranch) refs << r.fullName;
+            }
+            reflogCommits = repo.reflogCommits(refs);
+        }
+        QStringList extra;
+        for (const auto& [sha, selector] : std::as_const(reflogCommits)) extra << sha;
+        s.commits = repo.log(options, s.head, !s.refs.isEmpty(), extra);
+        if (!extra.isEmpty())
+            s.reflogOnly = reflogOnlyCommits(s.commits, options.allRefs ? s.refs : QVector<Ref>{}, s.head, reflogCommits);
         s.graph = computeGraph(s.commits);
         s.hasLog = true;
     }

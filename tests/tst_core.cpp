@@ -10,6 +10,7 @@
 #include "hosting/Account.h"
 #include "hosting/RemoteUrl.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
@@ -232,6 +233,98 @@ private slots:
         const QVector<FileChange> changes = repo.commitChanges(s.head.sha, info.commit.parents);
         QCOMPARE(changes.size(), 1);
         QCOMPARE(changes.first().path, QStringLiteral("g.txt"));
+    }
+
+    // Reflog entries say what moved the ref and when; commits only reflogs remember are marked
+    // lost, and All Commits can include them.
+    void reflog() {
+        const QString dir = newRepo();
+        auto run = [&](const QStringList& args) {
+            const GitResult r = git(dir, args);
+            QVERIFY2(r.ok(), qPrintable(r.message()));
+        };
+        write(dir, QStringLiteral("a.txt"), "1\n");
+        commitAll(dir, QStringLiteral("first"));
+        write(dir, QStringLiteral("a.txt"), "2\n");
+        commitAll(dir, QStringLiteral("second"));
+        run({QStringLiteral("checkout"), QStringLiteral("-q"), QStringLiteral("-b"), QStringLiteral("dev")});
+        write(dir, QStringLiteral("d.txt"), "d\n");
+        commitAll(dir, QStringLiteral("dev work"));
+        run({QStringLiteral("checkout"), QStringLiteral("-q"), QStringLiteral("main")});
+        write(dir, QStringLiteral("a.txt"), "3\n");
+        commitAll(dir, QStringLiteral("third"));
+        run({QStringLiteral("commit"), QStringLiteral("-q"), QStringLiteral("--amend"), QStringLiteral("-m"),
+             QStringLiteral("third amended")});
+        run({QStringLiteral("reset"), QStringLiteral("-q"), QStringLiteral("--hard"), QStringLiteral("HEAD~1")});
+
+        const Repository repo(dir);
+        const QString second = repo.head().sha;
+        const qint64 now = QDateTime::currentSecsSinceEpoch();
+        QVector<ReflogEntry> head = repo.reflog(QStringLiteral("HEAD"));
+        QCOMPARE(head.size(), 8);
+        QCOMPARE(head[0].selector, QStringLiteral("HEAD@{0}"));
+        QCOMPARE(head[0].action, QStringLiteral("reset"));
+        QCOMPARE(head[0].message, QStringLiteral("moving to HEAD~1"));
+        QCOMPARE(head[0].commit.sha, second);
+        QCOMPARE(head[0].identity, QStringLiteral("Test Author"));
+        QVERIFY(!head[0].lost);
+        QCOMPARE(head[1].action, QStringLiteral("commit (amend)"));
+        QCOMPARE(head[1].message, QStringLiteral("third amended"));
+        QCOMPARE(head[1].commit.subject, QStringLiteral("third amended"));
+        QVERIFY(head[1].lost);
+        QCOMPARE(head[2].message, QStringLiteral("third"));
+        QVERIFY(head[2].lost);
+        QCOMPARE(head[3].action, QStringLiteral("checkout"));
+        QCOMPARE(head[3].message, QStringLiteral("moving from dev to main"));
+        QCOMPARE(head[4].message, QStringLiteral("dev work"));
+        QVERIFY(!head[4].lost);  // still on dev
+        QCOMPARE(head[5].message, QStringLiteral("moving from main to dev"));
+        QCOMPARE(head[7].selector, QStringLiteral("HEAD@{7}"));
+        QCOMPARE(head[7].action, QStringLiteral("commit (initial)"));
+        for (const ReflogEntry& e : std::as_const(head)) QVERIFY(qAbs(e.time - now) < 3600);
+        QCOMPARE(repo.reflog(QStringLiteral("HEAD"), 2).size(), 2);
+
+        const QVector<ReflogEntry> dev = repo.reflog(QStringLiteral("refs/heads/dev"));
+        QCOMPARE(dev.size(), 2);
+        QCOMPARE(dev[0].selector, QStringLiteral("dev@{0}"));
+        QCOMPARE(dev[1].action, QStringLiteral("branch"));
+        QCOMPARE(dev[1].message, QStringLiteral("Created from HEAD"));
+        run({QStringLiteral("-c"), QStringLiteral("core.logAllRefUpdates=false"), QStringLiteral("branch"),
+             QStringLiteral("quiet")});
+        QVERIFY(repo.reflog(QStringLiteral("refs/heads/quiet")).isEmpty());
+        QVERIFY(repo.reflog(QStringLiteral("refs/heads/missing")).isEmpty());
+
+        // Two lost commits in a line, made on a detached HEAD; then a stash, whose own reflog
+        // must not bring its commits into the graph.
+        run({QStringLiteral("checkout"), QStringLiteral("-q"), QStringLiteral("--detach")});
+        write(dir, QStringLiteral("x.txt"), "1\n");
+        commitAll(dir, QStringLiteral("x1"));
+        write(dir, QStringLiteral("x.txt"), "2\n");
+        commitAll(dir, QStringLiteral("x2"));
+        run({QStringLiteral("checkout"), QStringLiteral("-q"), QStringLiteral("main")});
+        write(dir, QStringLiteral("a.txt"), "dirty\n");
+        run({QStringLiteral("stash"), QStringLiteral("-q")});
+
+        const RepoSnapshot plain = loadSnapshot(repo, LogOptions{}, {});
+        QCOMPARE(plain.commits.size(), 3);  // first, second, dev work
+        QVERIFY(plain.reflogOnly.isEmpty());
+        LogOptions withReflog;
+        withReflog.reflog = true;
+        const RepoSnapshot s = loadSnapshot(repo, withReflog, plain.fingerprint);
+        QVERIFY(s.hasLog);  // the option is part of the fingerprint
+        QCOMPARE(s.commits.size(), 7);
+        QCOMPARE(s.graph.size(), s.commits.size());
+        QHash<QString, QString> bySubject;
+        for (const Commit& c : s.commits) {
+            QVERIFY(c.sha != s.stashes.value(0).sha);
+            if (s.reflogOnly.contains(c.sha)) bySubject.insert(c.subject, s.reflogOnly.value(c.sha));
+        }
+        QCOMPARE(bySubject.size(), 4);
+        QCOMPARE(bySubject.value(QStringLiteral("x2")), QStringLiteral("HEAD@{2}"));      // HEAD@{0} stash, @{1} checkout
+        QCOMPARE(bySubject.value(QStringLiteral("x1"), QStringLiteral("?")), QString());  // x2 is the newest of the line
+        QCOMPARE(bySubject.value(QStringLiteral("third amended")), QStringLiteral("HEAD@{6}"));
+        QCOMPARE(bySubject.value(QStringLiteral("third")), QStringLiteral("HEAD@{7}"));
+        QVERIFY(repo.reflog(QStringLiteral("HEAD")).value(2).lost);
     }
 
     // File history follows renames, includes merges (compared with the first parent) and
@@ -1183,6 +1276,22 @@ private slots:
         QVERIFY(lineLog[1].diff.oldPath.isEmpty());
         QCOMPARE(lineLog[1].diff.newPath, QStringLiteral("a b.txt"));
         QCOMPARE(lineLog[1].diff.hunks.first().lines.size(), 1);
+
+        // Reflog messages: the command before the first ": ", or all of it without one.
+        auto entry = [](const QByteArray& selector, const QByteArray& subject) {
+            return QByteArrayList{"c1", {}, "A", "a@x", "1", "A", "a@x", "1", "s", selector, "Me", subject}.join('\x1f') +
+                   "\x1e\n";
+        };
+        const QVector<ReflogEntry> rl = parse::reflog(entry("HEAD@{0}", "clone: from https://example.com/r.git") +
+                                                      entry("origin/main@{0}", "update by push") + entry("HEAD@{1}", ""));
+        QCOMPARE(rl.size(), 3);
+        QCOMPARE(rl[0].action, QStringLiteral("clone"));
+        QCOMPARE(rl[0].message, QStringLiteral("from https://example.com/r.git"));
+        QCOMPARE(rl[1].selector, QStringLiteral("origin/main@{0}"));
+        QCOMPARE(rl[1].action, QStringLiteral("update by push"));
+        QVERIFY(rl[1].message.isEmpty());
+        QVERIFY(rl[2].action.isEmpty());
+        QCOMPARE(parse::reflogTimes("HEAD@{1700000000}\nmain@{1700000001}\n"), (QVector<qint64>{1700000000, 1700000001}));
     }
 
     void remoteUrlParsing_data() {

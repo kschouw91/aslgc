@@ -88,8 +88,15 @@ public:
     void savePatches(const QStringList& shas);
     // Shows what changed between `sha` and the working tree in All Commits.
     void compareWithWorkingTree(const QString& sha);
-    // Selects the commit in All Commits and brings this tab and its window to the front.
-    void revealCommit(const QString& sha);
+    // Selects the commit in All Commits and brings this tab and its window to the front. With
+    // `showLost`, lost commits are shown first when the commit isn't listed otherwise.
+    void revealCommit(const QString& sha, bool showLost = false);
+    // The reflog of HEAD or a branch ("refs/heads/main") in its own window.
+    void showReflog(const QString& ref = QStringLiteral("HEAD"));
+    // Lost commits: on no branch or tag but still in the reflog of HEAD or a local branch. Showing
+    // them in All Commits is a setting shared by all repositories.
+    bool showsLostCommits() const { return m_logOptions.reflog; }
+    void setShowLostCommits(bool show);
     QVector<RefBadge> badgesFor(const QString& sha) const;
 
 signals:
@@ -97,6 +104,7 @@ signals:
     void busyChanged(bool busy);
     void statusMessage(const QString& message);
     void activateRequested();
+    void lostCommitsShownChanged(bool shown);
 
 private:
     void applySnapshot(RepoSnapshot snapshot);
@@ -171,6 +179,7 @@ private:
     bool m_refreshPending = false;
     bool m_pendingForceLog = false;
     bool m_loaded = false;
+    QString m_revealSha;  // to select in All Commits once the reloading commit list has it
 };
 
 }  // namespace aslgc

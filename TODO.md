@@ -71,7 +71,8 @@ Legend: `[x]` done · `[ ]` to do · size **S** < 1 day, **M** 1–3 days, **L**
 - [x] History of selected lines (`git log -L`): from the blame view or any commit diff; follows renames; working tree lines are matched to HEAD's
 - [x] Compare commits: select two to see their differences, three or more (or "include the oldest") for their combined changes; compare any commit with the working tree; save either as a patch
 - [ ] File tree at a revision: browse, open, save a file as of that commit — M
-- [ ] Reflog view, plus an option to show reflog entries in the graph — S
+- [x] Reflog window for HEAD or any branch (View → Reflog, a branch's or All Commits' context menu): what moved the ref and when, lost commits marked, filter, commit menu (branch, reset, cherry-pick…)
+- [x] Show lost commits in All Commits: commits only a reflog of HEAD or a local branch still remembers, faded and named after their entry (`HEAD@{2}`), with "Create a branch here…"
 - [ ] Graph filters: current branch only, chosen branches, hide tags, show/hide stashes, collapse merges — M
 - [ ] Pin branches so they stay at the top and in the filter — S
 - [ ] Layout options: details pane bottom or right, hide details pane, open a commit in its own window — S

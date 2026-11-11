@@ -31,4 +31,7 @@ First public release.
   any commit with the working tree, and save a comparison or the selected commits as patches.
 - History of selected lines: select lines in the blame view or a commit diff to list the commits that
   changed them, each with the diff of just those lines.
+- Reflog window for HEAD or any branch (View → Reflog): every commit, checkout, reset, merge and rebase,
+  with commits that are no longer on any branch marked. All Commits can show these lost commits too,
+  faded and named after their reflog entry, so an amend, reset or rebase can be undone with a branch.
 - Theme-aware Tabler action icons; desktop entry, AppStream metadata and man page.

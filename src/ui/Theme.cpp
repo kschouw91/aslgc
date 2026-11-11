@@ -151,6 +151,7 @@ QColor badgeColor(Badge kind) {
         case Badge::Remote: return QColor(0x8250df);
         case Badge::Tag: return QColor(0xbc4c00);
         case Badge::Stash: return QColor(0x6e7781);
+        case Badge::Reflog: return QColor(0x1b7c83);
     }
     return QColor(0x6e7781);
 }

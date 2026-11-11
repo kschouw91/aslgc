@@ -7,10 +7,16 @@
 #include "Graph.h"
 #include "Types.h"
 
+#include <QHash>
+#include <utility>
+
 namespace aslgc {
 
 struct LogOptions {
     bool allRefs = true;  // all branches/remotes/tags, or just HEAD
+    // Also the commits that only the reflogs of HEAD and the local branches still point to, such
+    // as commits left behind by an amend, a reset or a rebase.
+    bool reflog = false;
     int maxCount = 20000;
 };
 
@@ -37,7 +43,9 @@ public:
     Operation operation() const;
     QString rebaseProgress() const;  // "3/7" while rebasing
 
-    QVector<Commit> log(const LogOptions& options, const HeadInfo& head, bool hasRefs) const;
+    // `extraCommits` are listed too, with the commits they lead to.
+    QVector<Commit> log(const LogOptions& options, const HeadInfo& head, bool hasRefs,
+                        const QStringList& extraCommits = {}) const;
     CommitInfo commitInfo(const QString& sha) const;
     // `folder` limits the list to one folder ("" = everything).
     QVector<FileChange> commitChanges(const QString& sha, const QStringList& parents, const QString& folder = {}) const;
@@ -73,6 +81,13 @@ public:
                                   QString* error = nullptr) const;
     QString configValue(const QString& key) const;
 
+    // The reflog of `ref` ("HEAD", "refs/heads/main", …), newest entry first; empty when there is
+    // none. Entries whose commit no branch, remote branch, tag or HEAD reaches are marked lost.
+    QVector<ReflogEntry> reflog(const QString& ref, int maxCount = 10000) const;
+    // The commits the reflogs of `refs` point to, each once, with the newest entry pointing to it
+    // ("HEAD@{2}"); `refs` come in order of preference.
+    QVector<std::pair<QString, QString>> reflogCommits(const QStringList& refs) const;
+
 private:
     QString m_root;
     QString m_gitDir;
@@ -94,6 +109,9 @@ struct RepoSnapshot {
     bool hasLog = false;
     QVector<Commit> commits;
     QVector<GraphRow> graph;
+    // With LogOptions::reflog: the listed commits that no ref reaches, each with the newest reflog
+    // entry pointing to it ("HEAD@{2}") when it is the newest of its line, otherwise empty.
+    QHash<QString, QString> reflogOnly;
     QString error;
 };
 

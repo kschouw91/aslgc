@@ -78,12 +78,14 @@ QString commitHeaderHtml(const CommitInfo& info, const QVector<RefBadge>& badges
 }
 
 void CommitModel::setCommits(const QVector<Commit>& commits, const QVector<GraphRow>& graph,
-                             const QHash<QString, QVector<RefBadge>>& badges, const QString& headSha) {
+                             const QHash<QString, QVector<RefBadge>>& badges, const QString& headSha,
+                             const QSet<QString>& reflogOnly) {
     beginResetModel();
     m_commits = commits;
     m_graph = graph;
     m_badges = badges;
     m_headSha = headSha;
+    m_reflogOnly = reflogOnly;
     m_rowOf.clear();
     m_rowOf.reserve(commits.size());
     for (int i = 0; i < commits.size(); ++i) m_rowOf.insert(commits[i].sha, i);
@@ -106,6 +108,9 @@ QVariant CommitModel::data(const QModelIndex& index, int role) const {
         }
     } else if (role == Qt::ToolTipRole) {
         switch (index.column()) {
+            case Description:
+                return m_reflogOnly.contains(c.sha) ? tr("Not on any branch or tag: only the reflog still remembers this commit")
+                                                    : QVariant();
             case Author: return QStringLiteral("%1 <%2>").arg(c.authorName, c.authorEmail);
             case Date: return QDateTime::fromSecsSinceEpoch(c.authorTime).toString(Qt::RFC2822Date);
             case Sha: return c.sha;
@@ -113,7 +118,7 @@ QVariant CommitModel::data(const QModelIndex& index, int role) const {
         }
     } else if (role == Qt::ForegroundRole && index.column() != Description) {
         QColor col = QApplication::palette().color(QPalette::Text);
-        col.setAlphaF(0.7f);
+        col.setAlphaF(m_reflogOnly.contains(c.sha) ? 0.45f : 0.7f);
         return col;
     } else if (role == Qt::FontRole && index.column() == Sha) {
         QFont f = QApplication::font();
@@ -179,8 +184,11 @@ void CommitDelegate::paint(QPainter* p, const QStyleOptionViewItem& option, cons
         }
     }
 
+    // Commits only the reflog keeps are faded: node, subject (in italics) and the other columns.
+    const bool reflogOnly = model->isReflogOnly(c.sha);
     const QPointF center(laneX(g.column), mid);
-    const QColor nodeColor = theme::laneColor(g.color);
+    QColor nodeColor = theme::laneColor(g.color);
+    if (reflogOnly) nodeColor = theme::mix(opt.palette.color(QPalette::Base), nodeColor, 0.5);
     constexpr qreal rad = 4.5;
     if (c.isMerge()) {
         p->setPen(QPen(nodeColor, 2.0));
@@ -224,11 +232,15 @@ void CommitDelegate::paint(QPainter* p, const QStyleOptionViewItem& option, cons
         x += bw + 4;
     }
 
-    p->setFont(opt.font);
-    p->setPen(opt.palette.color(selected ? QPalette::HighlightedText : QPalette::Text));
+    QFont subjectFont = opt.font;
+    subjectFont.setItalic(reflogOnly);
+    QColor subjectColor = opt.palette.color(selected ? QPalette::HighlightedText : QPalette::Text);
+    if (reflogOnly && !selected) subjectColor.setAlphaF(0.55f);
+    p->setFont(subjectFont);
+    p->setPen(subjectColor);
     const QRectF textRect(x + 2, r.top(), r.right() - x - 4, r.height());
     p->drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft,
-                opt.fontMetrics.elidedText(c.subject, Qt::ElideRight, int(textRect.width())));
+                QFontMetrics(subjectFont).elidedText(c.subject, Qt::ElideRight, int(textRect.width())));
     p->restore();
 }
 

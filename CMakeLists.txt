@@ -68,6 +68,7 @@ qt_add_executable(aslgc
     src/ui/MainWindow.h src/ui/MainWindow.cpp
     src/ui/OperationDialog.h src/ui/OperationDialog.cpp
     src/ui/PullRequestDialog.h src/ui/PullRequestDialog.cpp
+    src/ui/ReflogWindow.h src/ui/ReflogWindow.cpp
     src/ui/RepoPickerDialog.h src/ui/RepoPickerDialog.cpp
     src/ui/RepoView.h src/ui/RepoView.cpp
     src/ui/Sidebar.h src/ui/Sidebar.cpp

@@ -53,6 +53,7 @@ private:
     QAction* m_terminal;
     QAction* m_folder;
     QAction* m_refresh;
+    QAction* m_showLost;  // a setting shared by all tabs
     QList<QAction*> m_repoActions;
 };
 

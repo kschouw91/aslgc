@@ -87,6 +87,30 @@
     </message>
 </context>
 <context>
+    <name>aslgc::ReflogWindow</name>
+    <message numerus="yes">
+        <source>%n entry(s)</source>
+        <translation>
+            <numerusform>%n entry</numerusform>
+            <numerusform>%n entries</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <source>%1 of %n entry(s)</source>
+        <translation>
+            <numerusform>%1 of %n entry</numerusform>
+            <numerusform>%1 of %n entries</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <source>%n lost commit(s)</source>
+        <translation>
+            <numerusform>%n lost commit</numerusform>
+            <numerusform>%n lost commits</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>aslgc::RepoView</name>
     <message numerus="yes">
         <source>%n conflicted file(s) — resolve them in Local Changes, then continue.</source>

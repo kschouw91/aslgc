@@ -93,6 +93,19 @@ struct FileLogEntry {
     QVector<FileChange> changes;
 };
 
+// One entry of a reflog: where a ref (HEAD or a branch) pointed after it moved, and why it moved.
+struct ReflogEntry {
+    QString selector;  // "HEAD@{2}", "main@{0}"
+    QString action;    // what moved the ref: "commit", "commit (amend)", "checkout", "reset", "rebase (finish)", …
+    QString message;   // the rest of the reflog message, e.g. "moving from main to dev"
+    QString identity;  // who moved it
+    qint64 time = 0;   // when it moved
+    Commit commit;     // where it pointed afterwards
+    // The commit is on no branch, remote branch or tag and is not checked out: only reflogs still
+    // point to it, until they expire.
+    bool lost = false;
+};
+
 struct BlameCommit {
     QString sha;
     QString authorName;

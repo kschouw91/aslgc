@@ -16,7 +16,7 @@ QColor statusColor(char status);
 QIcon statusIcon(char status);
 QString statusName(char status);
 
-enum class Badge { Head, CurrentBranch, Local, Remote, Tag, Stash };
+enum class Badge { Head, CurrentBranch, Local, Remote, Tag, Stash, Reflog };
 QColor badgeColor(Badge kind);
 
 struct DiffColors {

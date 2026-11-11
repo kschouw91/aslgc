@@ -124,6 +124,8 @@ HistoryView::HistoryView(RepoView* owner) : QWidget(owner), m_owner(owner) {
     connect(m_header, &QTextBrowser::anchorClicked, this, [this](const QUrl& url) {
         if (url.scheme() == QLatin1String("commit")) {
             selectCommit(url.path());
+        } else if (url.scheme() == QLatin1String("branch")) {
+            m_owner->createBranch(url.path());
         } else if (url.scheme() == QLatin1String("compare") && m_compare) {
             if (url.path() == QLatin1String("save")) {
                 saveComparisonPatch();
@@ -160,13 +162,14 @@ HistoryView::HistoryView(RepoView* owner) : QWidget(owner), m_owner(owner) {
 }
 
 void HistoryView::setCommits(const QVector<Commit>& commits, const QVector<GraphRow>& graph,
-                             const QHash<QString, QVector<RefBadge>>& badges, const QString& headSha) {
+                             const QHash<QString, QVector<RefBadge>>& badges, const QString& headSha,
+                             const QSet<QString>& reflogOnly) {
     const QString keep = selectedSha();
     const QStringList keepSelected = selectedShas();
     const int scroll = m_list->verticalScrollBar()->value();
     {
         QSignalBlocker block(m_list->selectionModel());
-        m_model->setCommits(commits, graph, badges, headSha);
+        m_model->setCommits(commits, graph, badges, headSha, reflogOnly);
     }
     QString target = keep;
     if (target.isEmpty() || m_model->rowOf(target) < 0) target = m_firstLoad ? headSha : QString();
@@ -410,7 +413,13 @@ void HistoryView::showCommit(const QString& sha) {
 }
 
 void HistoryView::renderHeader(const CommitInfo& info) {
-    m_header->setHtml(commitHeaderHtml(info, m_model->badgesFor(info.commit.sha), palette()));
+    QString html = commitHeaderHtml(info, m_model->badgesFor(info.commit.sha), palette());
+    if (m_model->isReflogOnly(info.commit.sha)) {
+        html += QStringLiteral("<p>%1 <a href='branch:%2'>%3</a></p>")
+                    .arg(tr("Lost commit: on no branch or tag, only the reflog still remembers it.").toHtmlEscaped(),
+                         info.commit.sha, tr("Create a branch here…").toHtmlEscaped());
+    }
+    m_header->setHtml(html);
 }
 
 void HistoryView::loadFileDiff(bool keepScroll) {

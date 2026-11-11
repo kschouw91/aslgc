@@ -26,8 +26,11 @@ class HistoryView : public QWidget {
 public:
     explicit HistoryView(RepoView* owner);
 
+    // `reflogOnly`: lost commits, listed because a reflog still points to them.
     void setCommits(const QVector<Commit>& commits, const QVector<GraphRow>& graph,
-                    const QHash<QString, QVector<RefBadge>>& badges, const QString& headSha);
+                    const QHash<QString, QVector<RefBadge>>& badges, const QString& headSha,
+                    const QSet<QString>& reflogOnly = {});
+    bool hasCommit(const QString& sha) const { return m_model->rowOf(sha) >= 0; }
     void selectCommit(const QString& sha);
     void showCommit(const QString& sha);  // details even when not in the list
     QString selectedSha() const;

@@ -124,8 +124,21 @@ void MainWindow::createActions() {
     auto* find = make(tr("Find Commit…"), QStringLiteral("search"), QKeySequence::Find, onRepo(&RepoView::findCommit));
     auto* fileHistory = make(tr("File History…"), QStringLiteral("history"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_H),
                              onRepo(&RepoView::chooseFileHistory));
-    m_repoActions = {m_fetch,  m_pull,    m_push,    m_stash,     m_pop,       m_branch, m_gitFlow,  m_terminal,
-                     m_folder, m_refresh, addRemote, showChanges, showHistory, find,     fileHistory};
+    auto* reflog = make(tr("Reflog"), QStringLiteral("restore"), QKeySequence(), [this] {
+        if (RepoView* r = currentRepo()) r->showReflog();
+    });
+    reflog->setToolTip(tr("Everything HEAD and the branches pointed to: find commits lost to an amend, reset or rebase"));
+    m_showLost = make(tr("Show Lost Commits"), QString(), QKeySequence(), [this](bool show) {
+        if (RepoView* r = currentRepo())
+            r->setShowLostCommits(show);  // the other tabs follow its signal
+        else
+            QSettings().setValue(QStringLiteral("history/showLostCommits"), show);
+    });
+    m_showLost->setCheckable(true);
+    m_showLost->setChecked(QSettings().value(QStringLiteral("history/showLostCommits"), false).toBool());
+    m_showLost->setToolTip(tr("Also list commits that are on no branch or tag but still in a reflog, faded, in All Commits"));
+    m_repoActions = {m_fetch,  m_pull,    m_push,    m_stash,     m_pop,       m_branch, m_gitFlow,   m_terminal,
+                     m_folder, m_refresh, addRemote, showChanges, showHistory, find,     fileHistory, reflog};
 
     // Menus
     QMenu* file = menuBar()->addMenu(tr("&File"));
@@ -152,7 +165,9 @@ void MainWindow::createActions() {
     repo->addActions({m_terminal, m_folder, m_refresh});
 
     QMenu* view = menuBar()->addMenu(tr("&View"));
-    view->addActions({showChanges, showHistory, find, fileHistory});
+    view->addActions({showChanges, showHistory, find, fileHistory, reflog});
+    view->addSeparator();
+    view->addAction(m_showLost);
     view->addSeparator();
     view->addAction(make(tr("Next Tab"), QString(), QKeySequence(Qt::CTRL | Qt::Key_PageDown), [this] {
         if (m_tabs->count() > 1) m_tabs->setCurrentIndex((m_tabs->currentIndex() + 1) % m_tabs->count());
@@ -278,6 +293,12 @@ bool MainWindow::openRepository(const QString& path, bool replaceCurrentWelcome)
         m_tabs->setCurrentWidget(view);
         raise();
         activateWindow();
+    });
+    connect(view, &RepoView::lostCommitsShownChanged, this, [this](bool show) {
+        m_showLost->setChecked(show);
+        for (int i = 0; i < m_tabs->count(); ++i) {
+            if (auto* r = qobject_cast<RepoView*>(m_tabs->widget(i))) r->setShowLostCommits(show);
+        }
     });
     const QIcon icon = theme::actionIcon(QStringLiteral("folder"));
     int index = -1;

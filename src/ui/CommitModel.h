@@ -7,6 +7,7 @@
 
 #include <QAbstractTableModel>
 #include <QHash>
+#include <QSet>
 #include <QStyledItemDelegate>
 
 namespace aslgc {
@@ -23,8 +24,10 @@ public:
 
     using QAbstractTableModel::QAbstractTableModel;
 
+    // `reflogOnly`: commits that no ref reaches, listed because a reflog points to them; they are dimmed.
     void setCommits(const QVector<Commit>& commits, const QVector<GraphRow>& graph,
-                    const QHash<QString, QVector<RefBadge>>& badges, const QString& headSha);
+                    const QHash<QString, QVector<RefBadge>>& badges, const QString& headSha,
+                    const QSet<QString>& reflogOnly = {});
 
     int rowCount(const QModelIndex& parent = {}) const override;
     int columnCount(const QModelIndex& parent = {}) const override;
@@ -36,6 +39,7 @@ public:
     QVector<RefBadge> badges(int row) const { return m_badges.value(m_commits[row].sha); }
     QVector<RefBadge> badgesFor(const QString& sha) const { return m_badges.value(sha); }
     bool isHead(int row) const { return m_commits[row].sha == m_headSha; }
+    bool isReflogOnly(const QString& sha) const { return m_reflogOnly.contains(sha); }
     int rowOf(const QString& sha) const { return m_rowOf.value(sha, -1); }
 
 private:
@@ -44,6 +48,7 @@ private:
     QHash<QString, QVector<RefBadge>> m_badges;
     QHash<QString, int> m_rowOf;
     QString m_headSha;
+    QSet<QString> m_reflogOnly;
 };
 
 // Paints the lane graph, ref badges and subject in the Description column.

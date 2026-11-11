@@ -18,6 +18,7 @@ helpers and `~/.gitconfig` behave exactly as they do in a terminal.
 - **Interactive rebase**: reorder, reword, edit, squash, fix up or drop commits in a dialog; edit any commit's message
 - **git-flow**: set up, start and finish features, bugfixes, releases and hotfixes (fetch, merge, tag, delete, push) from the toolbar or a branch's menu; support branches for older release lines; shares its settings with the git-flow command line tool
 - **File history and blame**: the history of any file (following renames), folder or selected lines on the current branch, another branch or all of them, with uncommitted changes on top; a line-by-line blame that clicks through to each commit, steps back to earlier revisions and can ignore whitespace or follow moved and copied lines
+- **Reflog**: every checkout, commit, reset, merge and rebase of HEAD or a branch, in its own window; commits left behind by an amend, reset or rebase are marked and can be shown in the commit graph, ready to be rescued with a branch
 - **Fetch, pull and push** with a progress dialog; credential and SSH passphrase prompts handled in the GUI
 - **Conflicts**: highlighted conflict markers, resolve with ours / theirs / merge tool, and a Continue · Skip · Abort banner for merges, rebases, cherry-picks and reverts
 - **GitHub & GitLab accounts** (including Enterprise / self-managed): clone from your repository list, create pull / merge requests, open commits and branches on the web, token-based HTTPS authentication

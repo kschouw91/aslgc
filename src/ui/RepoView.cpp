@@ -10,6 +10,7 @@
 #include "InteractiveRebaseDialog.h"
 #include "OperationDialog.h"
 #include "PullRequestDialog.h"
+#include "ReflogWindow.h"
 #include "Theme.h"
 #include "hosting/AccountStore.h"
 
@@ -143,6 +144,7 @@ RepoView::RepoView(const Repository& repo, QWidget* parent) : QWidget(parent), m
     m_split->restoreState(settings.value(QStringLiteral("layout/repoSplit")).toByteArray());
     m_changes->restoreLayout(settings);
     m_history->restoreLayout(settings);
+    m_logOptions.reflog = settings.value(QStringLiteral("history/showLostCommits"), false).toBool();
 
     connect(m_sidebar, &Sidebar::entrySelected, this, &RepoView::onSidebarSelected);
     connect(m_sidebar, &Sidebar::entryActivated, this, &RepoView::onSidebarActivated);
@@ -214,6 +216,7 @@ void RepoView::applySnapshot(RepoSnapshot s) {
     if (!logChanged) {
         s.commits = std::move(m_snapshot.commits);
         s.graph = std::move(m_snapshot.graph);
+        s.reflogOnly = std::move(m_snapshot.reflogOnly);
     }
     m_snapshot = std::move(s);
 
@@ -245,7 +248,17 @@ void RepoView::applySnapshot(RepoSnapshot s) {
             else
                 list.push_back({kind, r.name});
         }
-        m_history->setCommits(m_snapshot.commits, m_snapshot.graph, badges, h.sha);
+        // Lost commits: the newest of each line is named after the reflog entry pointing to it.
+        QSet<QString> lost;
+        for (auto it = m_snapshot.reflogOnly.cbegin(); it != m_snapshot.reflogOnly.cend(); ++it) {
+            lost.insert(it.key());
+            if (!it.value().isEmpty()) badges[it.key()].push_back({theme::Badge::Reflog, it.value()});
+        }
+        m_history->setCommits(m_snapshot.commits, m_snapshot.graph, badges, h.sha, lost);
+        if (!m_revealSha.isEmpty() && (m_history->hasCommit(m_revealSha) || !m_refreshPending)) {
+            m_history->selectCommit(m_revealSha);
+            m_revealSha.clear();
+        }
     }
     if (!m_loaded) {
         m_loaded = true;
@@ -492,6 +505,8 @@ void RepoView::onSidebarMenu(const SidebarEntry& e, const QPoint& pos) {
                 }
             }
             menu.addSeparator();
+            menu.addAction(theme::actionIcon(QStringLiteral("restore")), tr("Show Reflog of '%1'").arg(r.name), this,
+                           [this, r] { showReflog(r.fullName); });
             menu.addAction(theme::actionIcon(QStringLiteral("git-branch-deleted")), tr("Delete '%1'…").arg(r.name), this,
                            [this, r] { deleteBranch(r); })
                 ->setEnabled(!isCurrent);
@@ -515,6 +530,8 @@ void RepoView::onSidebarMenu(const SidebarEntry& e, const QPoint& pos) {
             }
             menu.addSeparator();
             menu.addAction(tr("New Branch from '%1'…").arg(r.name), this, [this, r] { createBranch(r.name); });
+            menu.addAction(theme::actionIcon(QStringLiteral("restore")), tr("Show Reflog of '%1'").arg(r.name), this,
+                           [this, r] { showReflog(r.fullName); });
             menu.addAction(theme::actionIcon(QStringLiteral("git-branch-deleted")), tr("Delete '%1' on Remote…").arg(r.name),
                            this, [this, r] { deleteRemoteBranch(r); });
             if (const auto hosted = hostedRemote(r.remoteName())) {
@@ -585,6 +602,14 @@ void RepoView::onSidebarMenu(const SidebarEntry& e, const QPoint& pos) {
             menu.addAction(tr("Save as Patch…"), this, [this, stash] { savePatch(stash.sha); });
             menu.addSeparator();
             menu.addAction(theme::actionIcon(QStringLiteral("trash")), tr("Drop…"), this, [this, stash] { dropStash(stash); });
+            break;
+        }
+        case SidebarEntry::History: {
+            QAction* lost = menu.addAction(tr("Show Lost Commits"), this, &RepoView::setShowLostCommits);
+            lost->setCheckable(true);
+            lost->setChecked(showsLostCommits());
+            lost->setToolTip(tr("Also list commits that are on no branch or tag but still in a reflog"));
+            menu.addAction(theme::actionIcon(QStringLiteral("restore")), tr("Show Reflog"), this, [this] { showReflog(); });
             break;
         }
         case SidebarEntry::Section:
@@ -1017,10 +1042,31 @@ void RepoView::chooseFileHistory() {
     showFileHistory(path, folder);
 }
 
-void RepoView::revealCommit(const QString& sha) {
+void RepoView::revealCommit(const QString& sha, bool showLost) {
     m_sidebar->selectHistory();
-    m_history->selectCommit(sha);
+    m_history->selectCommit(sha);  // shows the commit's details even when it is not listed
+    if (showLost && !m_history->hasCommit(sha) && !showsLostCommits()) {
+        m_revealSha = sha;  // selected once the commit list has reloaded with the lost commits
+        setShowLostCommits(true);
+    }
     emit activateRequested();
+}
+
+void RepoView::showReflog(const QString& ref) {
+    ReflogWindow* w = findChild<ReflogWindow*>(QString(), Qt::FindDirectChildrenOnly);
+    if (!w) w = new ReflogWindow(this);
+    w->setRef(ref);
+    w->show();
+    w->raise();
+    w->activateWindow();
+}
+
+void RepoView::setShowLostCommits(bool show) {
+    if (m_logOptions.reflog == show) return;
+    m_logOptions.reflog = show;
+    QSettings().setValue(QStringLiteral("history/showLostCommits"), show);
+    refresh(true);
+    emit lostCommitsShownChanged(show);
 }
 
 QVector<RefBadge> RepoView::badgesFor(const QString& sha) const { return m_history->badgesFor(sha); }
