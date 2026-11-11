@@ -4,6 +4,7 @@
 #include "Async.h"
 #include "Dialogs.h"
 #include "FileList.h"
+#include "HostProcess.h"
 #include "RepoView.h"
 #include "Theme.h"
 #include "hosting/AccountStore.h"
@@ -380,10 +381,18 @@ void ChangesView::showFileMenu(Side side, const QPoint& globalPos) {
             menu.addAction(tr("Mark as Resolved"), this, [this, conflicts] { resolve(conflicts, {}); });
             if (conflicts.size() == 1) {
                 menu.addAction(tr("Open in Merge Tool"), this, [this, path = conflicts.first().path] {
-                    QProcess p;
-                    m_owner->repo().git().prepare(
-                        p, {QStringLiteral("mergetool"), QStringLiteral("--no-prompt"), QStringLiteral("--"), path});
-                    if (!p.startDetached()) showError(this, tr("Merge Tool"), tr("Could not start git mergetool."));
+                    const QStringList args{QStringLiteral("mergetool"), QStringLiteral("--no-prompt"), QStringLiteral("--"),
+                                           path};
+                    bool started = false;
+                    if (host::isFlatpak()) {
+                        // Merge tools are installed on the host, so run the host's git mergetool.
+                        started = host::startDetached(QStringLiteral("git"), args, m_owner->repo().root());
+                    } else {
+                        QProcess p;
+                        m_owner->repo().git().prepare(p, args);
+                        started = p.startDetached();
+                    }
+                    if (!started) showError(this, tr("Merge Tool"), tr("Could not start git mergetool."));
                 });
             }
         }

@@ -7,6 +7,7 @@
 #include "Dialogs.h"
 #include "FileHistoryWindow.h"
 #include "HistoryView.h"
+#include "HostProcess.h"
 #include "InteractiveRebaseDialog.h"
 #include "OperationDialog.h"
 #include "PullRequestDialog.h"
@@ -34,12 +35,10 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
-#include <QProcess>
 #include <QPushButton>
 #include <QSettings>
 #include <QSplitter>
 #include <QStackedWidget>
-#include <QStandardPaths>
 #include <QStringListModel>
 #include <QTimer>
 #include <QUrl>
@@ -1252,9 +1251,16 @@ void RepoView::openTerminal() {
                    {QStringLiteral("xfce4-terminal"), {QStringLiteral("--working-directory=") + dir}},
                    {QStringLiteral("tilix"), {QStringLiteral("--working-directory=") + dir}},
                    {QStringLiteral("xterm"), {}}};
-    for (const auto& [program, args] : candidates) {
-        const QString path = QStandardPaths::findExecutable(program);
-        if (!path.isEmpty() && QProcess::startDetached(path, args, dir)) return;
+    QStringList programs;
+    for (const auto& candidate : candidates) programs.append(candidate.first);
+    if (const QString found = host::findExecutable(programs); !found.isEmpty()) {
+        const QString name = QFileInfo(found).fileName();
+        for (const auto& [program, args] : candidates) {
+            if (QFileInfo(program).fileName() == name) {
+                if (host::startDetached(found, args, dir)) return;
+                break;
+            }
+        }
     }
     showError(this, tr("Open Terminal"), tr("No terminal emulator found. Set the TERMINAL environment variable."));
 }

@@ -19,14 +19,19 @@ Legend: `[x]` done · `[ ]` to do · size **S** < 1 day, **M** 1–3 days, **L**
   - Finish can fetch first; branches behind their remote copy are fast-forwarded before merging, diverged ones stop the finish with a hint to pull
 
 ## 0. Housekeeping
-- [x] Connected to github.com/kyleschouw/aslgc (working copy = project root)
+- [x] Connected to github.com/kschouw91/aslgc (working copy = project root); the GitHub account was renamed from kyleschouw, whose URLs still redirect
+- [x] Switched to the renamed account `kschouw91`: app id `io.github.kschouw91.aslgc`, repository URLs, `origin` remote (the LICENSE keeps the holder name kyleschouw)
 - [x] First commit and push
 - [x] MIT license, third-party notices, SPDX headers, `.clang-format`, `.editorconfig`
 - [x] README for users and packagers, CONTRIBUTING, CHANGELOG, screenshots
 - [x] CI: build, tests, UI smoke test (offscreen screenshots) and staged install on Arch, Fedora, Debian 13, Ubuntu 24.04
 - [x] Packaging metadata: reverse-DNS app id, desktop entry, AppStream metainfo (validates cleanly), man page, relocatable libexec helper
-- [x] Arch `PKGBUILD` (`packaging/arch`, builds the latest commit) — publish to the AUR after the first push
-- [ ] Flatpak manifest (needs QtKeychain and git modules) and AppImage — M
+- [x] Arch `PKGBUILD` (`packaging/arch`, builds the latest `develop`), verified with `makepkg`
+- [ ] Publish `aslgc-git` to the AUR — S
+- [x] Flatpak manifest (`packaging/flatpak`, KDE 6.11 runtime, QtKeychain and git modules); Open in Terminal and Open in Merge Tool reach the host through `flatpak-spawn`
+- [x] AppImage (`tools/make-appimage.sh`, linuxdeploy; Qt bundled, system git)
+- [x] Release workflow: a version tag builds `.deb` (Ubuntu 24.04, Debian 13), `.rpm` (Fedora), AppImage and Flatpak bundle and publishes a GitHub release; `tools/set-version.sh` sets and checks the version
+- [ ] Submit the Flatpak to Flathub (manifest with a tagged git source, screenshots in the metainfo) after the first release — S
 - [x] Translations with Qt Linguist: `i18n/*.ts` compiled and embedded, English plural forms, Qt's own translations loaded
 - [ ] First real translations (any language) — S each
 - [x] Log file (`~/.local/state/aslgc/aslgc.log`) + Help → Open Log Folder
@@ -149,7 +154,9 @@ Legend: `[x]` done · `[ ]` to do · size **S** < 1 day, **M** 1–3 days, **L**
 
 ## Needs verification
 - [x] First CI run on all four distros: Arch, Fedora, Debian 13 and Ubuntu 24.04 with Qt 6.4 all pass
-- [ ] `packaging/arch/PKGBUILD` builds once the code is pushed
+- [x] `packaging/arch/PKGBUILD` builds with `makepkg` from the pushed repository (check() runs the tests)
+- [ ] First run of the release workflow (run it by hand from the Actions tab before the first tag): `.deb` / `.rpm` packaging, AppImage on Ubuntu 24.04, Flatpak build on the runner
+- [ ] Flatpak by hand: Open in Terminal and Open in Merge Tool on the host, keyring sign-in, SSH and signed commits
 - [ ] Real GitHub and GitLab sign-in: repository picker, pull/merge request creation, token-based HTTPS push (so far only checked against the live APIs with an invalid token)
 - [ ] GitHub browser sign-in end to end (needs the registered OAuth App Client ID)
 - [ ] Interactive rebase dialog by hand: drag-and-drop reordering, keyboard shortcuts (engine is covered by tests)
@@ -158,7 +165,7 @@ Legend: `[x]` done · `[ ]` to do · size **S** < 1 day, **M** 1–3 days, **L**
 - [ ] Graph lanes are never compacted, so very branchy histories get wide — M
 - [ ] `.git` watcher only covers top-level `refs/heads`; nested branch folders rely on focus refresh — S
 - [ ] Line-level staging of untracked files stages the whole file — S
-- [ ] `RepoView.cpp` (~1400 lines) should move its actions into a separate `RepoActions` class — M
+- [ ] `RepoView.cpp` (~1800 lines) should move its actions into a separate `RepoActions` class — M
 - [ ] Unit tests for UI-free logic still missing: sidebar tree building, badge mapping, operation detection — S
 
 ## Not planned

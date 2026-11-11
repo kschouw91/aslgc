@@ -2,6 +2,10 @@
 /build*/
 /out/
 /compile_commands.json
+/.flatpak-builder/
+*.AppImage
+*.flatpak
+/squashfs-root/
 CMakeUserPresets.json
 
 # Editors and tools

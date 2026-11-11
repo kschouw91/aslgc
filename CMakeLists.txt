@@ -8,7 +8,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
 
-set(ASLGC_APP_ID "io.github.kyleschouw.aslgc")  # desktop entry, AppStream id, icon name, Wayland app id
+set(ASLGC_APP_ID "io.github.kschouw91.aslgc")  # desktop entry, AppStream id, icon name, Wayland app id
 
 # ---- options ----
 option(BUILD_TESTING "Build the test suite" ON)
@@ -63,6 +63,7 @@ qt_add_executable(aslgc
     src/ui/FileHistoryWindow.h src/ui/FileHistoryWindow.cpp
     src/ui/FileList.h src/ui/FileList.cpp
     src/ui/HistoryView.h src/ui/HistoryView.cpp
+    src/ui/HostProcess.h src/ui/HostProcess.cpp
     src/ui/InteractiveRebaseDialog.h src/ui/InteractiveRebaseDialog.cpp
     src/ui/Log.h src/ui/Log.cpp
     src/ui/MainWindow.h src/ui/MainWindow.cpp
@@ -136,3 +137,34 @@ foreach(size IN LISTS ASLGC_ICON_SIZES)
             DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${size}x${size}/apps
             RENAME ${ASLGC_APP_ID}.png)
 endforeach()
+
+# ---- packages ----
+# Native .deb and .rpm packages for releases (see .github/workflows/release.yml):
+#   cpack -G DEB   (needs dpkg-dev)      cpack -G RPM   (needs rpm-build)
+# Library dependencies are detected from the binaries; git is added explicitly.
+set(CPACK_PACKAGE_NAME aslgc)
+set(CPACK_PACKAGE_VENDOR kyleschouw)
+set(CPACK_PACKAGE_CONTACT "kyleschouw <https://github.com/kschouw91/aslgc/issues>")
+set(CPACK_PACKAGE_HOMEPAGE_URL https://github.com/kschouw91/aslgc)
+set(CPACK_PACKAGE_DESCRIPTION
+    "aslgc is a fast, native Git client for the Linux desktop, built with Qt. It runs the git command line\n"
+    "underneath, so hooks, signing and configuration behave exactly as they do in a terminal.")
+set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE)
+set(CPACK_STRIP_FILES ON)
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+set(CPACK_DEBIAN_PACKAGE_SECTION vcs)
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_PACKAGE_DEPENDS git)
+set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
+set(CPACK_RPM_PACKAGE_LICENSE MIT)
+set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
+set(CPACK_RPM_PACKAGE_REQUIRES git)
+# Directories that belong to the filesystem and icon theme packages.
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+    /usr/libexec /usr/share/applications /usr/share/metainfo /usr/share/man /usr/share/man/man1 /usr/share/icons
+    /usr/share/icons/hicolor)
+foreach(size IN LISTS ASLGC_ICON_SIZES)
+    list(APPEND CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION /usr/share/icons/hicolor/${size}x${size}
+         /usr/share/icons/hicolor/${size}x${size}/apps)
+endforeach()
+include(CPack)

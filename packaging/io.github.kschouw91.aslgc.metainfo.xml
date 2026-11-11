@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- SPDX-License-Identifier: CC0-1.0 -->
 <component type="desktop-application">
-  <id>io.github.kyleschouw.aslgc</id>
+  <id>io.github.kschouw91.aslgc</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <name>aslgc</name>
   <summary>A simple Linux Git client</summary>
-  <developer id="io.github.kyleschouw">
+  <developer id="io.github.kschouw91">
     <name>kyleschouw</name>
   </developer>
-  <url type="homepage">https://github.com/kyleschouw/aslgc</url>
-  <url type="bugtracker">https://github.com/kyleschouw/aslgc/issues</url>
-  <url type="vcs-browser">https://github.com/kyleschouw/aslgc</url>
-  <url type="contribute">https://github.com/kyleschouw/aslgc/blob/main/CONTRIBUTING.md</url>
+  <url type="homepage">https://github.com/kschouw91/aslgc</url>
+  <url type="bugtracker">https://github.com/kschouw91/aslgc/issues</url>
+  <url type="vcs-browser">https://github.com/kschouw91/aslgc</url>
+  <url type="contribute">https://github.com/kschouw91/aslgc/blob/main/CONTRIBUTING.md</url>
   <description>
     <p>
       aslgc is a fast, native Git client for the Linux desktop, built with Qt. It runs the
@@ -27,15 +27,15 @@
       <li>GitHub and GitLab accounts: clone your repositories and create pull or merge requests</li>
     </ul>
   </description>
-  <launchable type="desktop-id">io.github.kyleschouw.aslgc.desktop</launchable>
+  <launchable type="desktop-id">io.github.kschouw91.aslgc.desktop</launchable>
   <screenshots>
     <screenshot type="default">
       <caption>Commit history with the branch graph</caption>
-      <image>https://raw.githubusercontent.com/kyleschouw/aslgc/main/docs/screenshots/history.png</image>
+      <image>https://raw.githubusercontent.com/kschouw91/aslgc/main/docs/screenshots/history.png</image>
     </screenshot>
     <screenshot>
       <caption>Staging individual hunks and lines</caption>
-      <image>https://raw.githubusercontent.com/kyleschouw/aslgc/main/docs/screenshots/changes.png</image>
+      <image>https://raw.githubusercontent.com/kschouw91/aslgc/main/docs/screenshots/changes.png</image>
     </screenshot>
   </screenshots>
   <provides>

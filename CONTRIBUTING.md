@@ -36,7 +36,7 @@ src/ui/         Qt Widgets
 src/askpass/    aslgc-askpass: GIT_ASKPASS / SSH_ASKPASS prompt and git credential helper
 i18n/           translations (Qt Linguist .ts)
 tests/          integration tests that run real git in temporary repositories
-packaging/      desktop entry, AppStream metadata, man page
+packaging/      desktop entry, AppStream metadata, man page, Arch PKGBUILD, Flatpak manifest
 resources/      icons (see below)
 tools/          maintenance scripts
 ```
@@ -103,6 +103,27 @@ User-visible strings use `tr()`. Use Qt's plural form for counts: `tr("%n file(s
   losslessly and keeps a result only when it is smaller and pixel-identical. For documentation
   screenshots use `tools/optimize-images.sh --palette docs/screenshots/*.png` (256 colours,
   roughly half the size; never use it on icons).
+
+## Releases
+
+Releases follow git-flow: `develop` → `release/<version>` → `main`, with the version tag on
+`main` (no prefix, e.g. `0.2.0`).
+
+1. Start the release from `develop` (Git Flow → Start Release).
+2. On the release branch, make sure `CHANGELOG.md` lists the changes under `## [Unreleased]`
+   (or `## [<version>] — unreleased`), then run `tools/set-version.sh <version>`. It sets the
+   version in `CMakeLists.txt`, dates the CHANGELOG entry and adds the release to the AppStream
+   metadata. Commit that.
+3. Finish the release (merge into `main` and back into `develop`, tag), then push `main`,
+   `develop` and the tag.
+
+Pushing the tag runs `.github/workflows/release.yml`: it checks the version with
+`tools/set-version.sh <version> --check`, builds the `.deb` (Ubuntu 24.04, Debian 13), `.rpm`
+(Fedora), AppImage and Flatpak bundle, installs or starts each one, and publishes them with the
+CHANGELOG notes as a GitHub release. To try the packaging without releasing, run the workflow by
+hand from the Actions tab; the packages are then only kept as workflow artifacts.
+
+Afterwards, start a new `## [Unreleased]` section at the top of `CHANGELOG.md` on `develop`.
 
 ## Pull requests
 

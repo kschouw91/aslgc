@@ -35,3 +35,6 @@ First public release.
   with commits that are no longer on any branch marked. All Commits can show these lost commits too,
   faded and named after their reflog entry, so an amend, reset or rebase can be undone with a branch.
 - Theme-aware Tabler action icons; desktop entry, AppStream metadata and man page.
+- Packages for every distribution: AppImage and Flatpak, plus `.deb` (Ubuntu 24.04, Debian 13), `.rpm`
+  (Fedora) and an Arch `PKGBUILD`. In the Flatpak, Open in Terminal and Open in Merge Tool use the
+  host's terminal and merge tool.

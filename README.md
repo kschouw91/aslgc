@@ -1,6 +1,6 @@
 # aslgc
 
-[![build](https://github.com/kyleschouw/aslgc/actions/workflows/build.yml/badge.svg)](https://github.com/kyleschouw/aslgc/actions/workflows/build.yml)
+[![build](https://github.com/kschouw91/aslgc/actions/workflows/build.yml/badge.svg)](https://github.com/kschouw91/aslgc/actions/workflows/build.yml)
 
 **a simple linux git client**: a fast, native Git GUI for the Linux desktop, built with C++20 and Qt 6.
 
@@ -29,6 +29,24 @@ helpers and `~/.gitconfig` behave exactly as they do in a terminal.
 ![Blame](docs/screenshots/blame.png)
 
 See [TODO.md](TODO.md) for the roadmap.
+
+## Installing
+
+Each [release](https://github.com/kschouw91/aslgc/releases) comes with packages for x86-64:
+
+| Package | For | Install |
+| --- | --- | --- |
+| `aslgc-<version>-x86_64.AppImage` | any distribution with glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 and later, Arch) | `chmod +x` it and run it |
+| `aslgc-<version>-x86_64.flatpak` | any distribution with Flatpak | `flatpak install --user aslgc-<version>-x86_64.flatpak` |
+| `aslgc_<version>_ubuntu24.04_amd64.deb`, `…_debian13_amd64.deb` | Ubuntu 24.04, Debian 13 | `sudo apt install ./aslgc_….deb` |
+| `aslgc-<version>-1.fc<NN>.x86_64.rpm` | Fedora | `sudo dnf install ./aslgc-….rpm` |
+| [`packaging/arch/PKGBUILD`](packaging/arch/PKGBUILD) | Arch Linux and derivatives | `makepkg -si` (builds the latest `develop`) |
+
+The AppImage, `.deb` and `.rpm` use the system `git`. The Flatpak brings its own `git` (and runs
+in a sandbox with access to your files, SSH and GPG agents, and the keyring). It reads
+`~/.gitconfig`, but helpers configured there that live outside the sandbox, such as a custom
+`credential.helper`, are not available to it; aslgc's own account sign-in still works. Open in
+Terminal and Open in Merge Tool start your host's terminal and `git mergetool`.
 
 ## Building
 
@@ -86,9 +104,9 @@ This installs:
 | --- | --- |
 | `bin/aslgc` | the application |
 | `libexec/aslgc/aslgc-askpass` | internal credential prompt / git credential helper |
-| `share/applications/io.github.kyleschouw.aslgc.desktop` | desktop entry |
-| `share/metainfo/io.github.kyleschouw.aslgc.metainfo.xml` | AppStream metadata |
-| `share/icons/hicolor/*/apps/io.github.kyleschouw.aslgc.png` | icons, 16–512 px |
+| `share/applications/io.github.kschouw91.aslgc.desktop` | desktop entry |
+| `share/metainfo/io.github.kschouw91.aslgc.metainfo.xml` | AppStream metadata |
+| `share/icons/hicolor/*/apps/io.github.kschouw91.aslgc.png` | icons, 16–512 px |
 | `share/man/man1/aslgc.1` | man page |
 | `share/doc/aslgc/` | README, CHANGELOG, LICENSE, third-party notices |
 
@@ -102,6 +120,18 @@ The install is relocatable: `aslgc` finds its helper relative to its own locatio
 | `CMAKE_INSTALL_PREFIX` | `/usr/local` | |
 | `BUILD_TESTING` | `ON` | build `aslgc-tests` (needs Qt Test) |
 | `ASLGC_GITHUB_CLIENT_ID` | empty | GitHub OAuth App client ID; enables browser sign-in (see below) |
+
+### Packages
+
+```sh
+cd build && cpack -G DEB        # or -G RPM; configure with -DCMAKE_INSTALL_PREFIX=/usr
+tools/make-appimage.sh dist     # needs linuxdeploy and linuxdeploy-plugin-qt (see the script)
+flatpak run org.flatpak.Builder --user --install --force-clean \
+    build-flatpak packaging/flatpak/io.github.kschouw91.aslgc.yml
+```
+
+The release workflow (`.github/workflows/release.yml`) builds all of them when a version tag is
+pushed; see [CONTRIBUTING.md](CONTRIBUTING.md#releases).
 
 ## GitHub & GitLab accounts
 

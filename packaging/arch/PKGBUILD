@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Development package that builds the latest commit from GitHub.
+# Development package that builds the latest commit on develop from GitHub.
 # Build with: cd packaging/arch && makepkg -si
 pkgname=aslgc-git
 _pkgname=aslgc
@@ -7,7 +7,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc="A simple Linux Git client"
 arch=('x86_64' 'aarch64')
-url="https://github.com/kyleschouw/aslgc"
+url="https://github.com/kschouw91/aslgc"
 license=('MIT')
 depends=('git' 'qt6-base' 'qt6-svg' 'qtkeychain-qt6' 'hicolor-icon-theme')
 makedepends=('cmake' 'qt6-tools')
@@ -15,7 +15,7 @@ optdepends=('gnome-keyring: store GitHub / GitLab account tokens'
             'kwallet: store GitHub / GitLab account tokens')
 provides=("$_pkgname")
 conflicts=("$_pkgname")
-source=("git+$url.git")
+source=("git+$url.git#branch=develop")
 sha256sums=('SKIP')
 
 pkgver() {
