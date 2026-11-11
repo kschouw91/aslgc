@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: CC0-1.0 -->
+<component type="desktop-application">
+  <id>io.github.kschouw91.aslgc</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>aslgc</name>
+  <summary>A simple Linux Git client</summary>
+  <developer id="io.github.kschouw91">
+    <name>kyleschouw</name>
+  </developer>
+  <url type="homepage">https://github.com/kschouw91/aslgc</url>
+  <url type="bugtracker">https://github.com/kschouw91/aslgc/issues</url>
+  <url type="vcs-browser">https://github.com/kschouw91/aslgc</url>
+  <url type="contribute">https://github.com/kschouw91/aslgc/blob/main/CONTRIBUTING.md</url>
+  <description>
+    <p>
+      aslgc is a fast, native Git client for the Linux desktop, built with Qt. It runs the
+      git command line underneath, so your hooks, signing and configuration behave exactly
+      as they do in a terminal.
+    </p>
+    <ul>
+      <li>Repository tabs with a commit graph, branch and tag labels, and commit details</li>
+      <li>Stage, unstage or discard whole files, single hunks or selected lines</li>
+      <li>Checkout, branch, merge, rebase, cherry-pick, revert, reset, tag and stash</li>
+      <li>Fetch, pull and push with progress, and conflict resolution with continue / abort</li>
+      <li>GitHub and GitLab accounts: clone your repositories and create pull or merge requests</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.kschouw91.aslgc.desktop</launchable>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Commit history with the branch graph</caption>
+      <image>https://raw.githubusercontent.com/kschouw91/aslgc/main/docs/screenshots/history.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Staging individual hunks and lines</caption>
+      <image>https://raw.githubusercontent.com/kschouw91/aslgc/main/docs/screenshots/changes.png</image>
+    </screenshot>
+  </screenshots>
+  <provides>
+    <binary>aslgc</binary>
+  </provides>
+  <categories>
+    <category>Development</category>
+    <category>RevisionControl</category>
+  </categories>
+  <keywords>
+    <keyword>git</keyword>
+    <keyword>version control</keyword>
+    <keyword>github</keyword>
+    <keyword>gitlab</keyword>
+  </keywords>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-11-11">
+      <description>
+        <p>First public release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

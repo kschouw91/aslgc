@@ -1,0 +1,207 @@
+# SPDX-License-Identifier: MIT
+# Builds the release packages and publishes them as a GitHub release when a version tag
+# (1.2.3 or v1.2.3) is pushed; git-flow's release and hotfix finish create that tag on main.
+# Pushing a release/<version> or hotfix/<version> branch builds the same packages without
+# publishing them, as a dry run before finishing.
+# Set the version with tools/set-version.sh on the release branch; this workflow stops if the
+# tag or branch, CMakeLists.txt, CHANGELOG.md and the AppStream metainfo disagree.
+name: release
+
+on:
+  push:
+    branches: ['release/**', 'hotfix/**']
+    tags: ['[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version
+        id: version
+        run: |
+          case "$GITHUB_REF_TYPE/$GITHUB_REF_NAME" in
+            tag/*) version="${GITHUB_REF_NAME#v}" ;;
+            branch/release/* | branch/hotfix/*) version="${GITHUB_REF_NAME#*/}"; version="${version#v}" ;;
+            *) version="" ;;
+          esac
+          if [ -n "$version" ]; then
+            tools/set-version.sh "$version" --check
+          else
+            version="$(sed -n 's/^project(aslgc VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  deb:
+    name: deb (${{ matrix.name }})
+    needs: version
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    strategy:
+      matrix:
+        include:
+          - name: Ubuntu 24.04
+            image: ubuntu:24.04
+            suffix: ubuntu24.04
+          - name: Debian 13
+            image: debian:trixie
+            suffix: debian13
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential dpkg-dev cmake ninja-build git ca-certificates file libgl-dev \
+            qt6-base-dev qt6-svg-dev qtkeychain-qt6-dev qt6-tools-dev qt6-l10n-tools
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
+          cmake --build build
+      - name: Package
+        working-directory: build
+        run: cpack -G DEB -D CPACK_DEBIAN_FILE_NAME="aslgc_${{ needs.version.outputs.version }}_${{ matrix.suffix }}_amd64.deb"
+      - name: Install and start
+        run: |
+          DEBIAN_FRONTEND=noninteractive apt-get install -y ./build/aslgc_*.deb
+          test -x /usr/libexec/aslgc/aslgc-askpass
+          QT_QPA_PLATFORM=offscreen aslgc --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.suffix }}
+          path: build/aslgc_*.deb
+          if-no-files-found: error
+
+  rpm:
+    name: rpm (Fedora)
+    needs: version
+    runs-on: ubuntu-24.04
+    container: fedora:latest
+    steps:
+      - name: Install dependencies
+        run: >-
+          dnf install -y gcc-c++ cmake ninja-build git rpm-build
+          qt6-qtbase-devel qt6-qtsvg-devel qtkeychain-qt6-devel qt6-qttools-devel
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
+          cmake --build build
+      - name: Package
+        working-directory: build
+        run: cpack -G RPM
+      - name: Install and start
+        run: |
+          dnf install -y ./build/aslgc-*.rpm
+          test -x /usr/libexec/aslgc/aslgc-askpass
+          QT_QPA_PLATFORM=offscreen aslgc --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-fedora
+          path: build/aslgc-*.rpm
+          if-no-files-found: error
+
+  appimage:
+    name: AppImage
+    needs: version
+    runs-on: ubuntu-24.04
+    # Built on the oldest supported distribution, so it runs wherever glibc is 2.39 or newer.
+    container: ubuntu:24.04
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build git ca-certificates curl file libgl-dev \
+            qt6-base-dev qt6-svg-dev qtkeychain-qt6-dev qt6-tools-dev qt6-l10n-tools qt6-wayland
+      - uses: actions/checkout@v4
+      - name: Download linuxdeploy
+        run: |
+          mkdir -p /opt/linuxdeploy && cd /opt/linuxdeploy
+          curl -fsSLO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -fsSLO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x ./*.AppImage
+      - name: Build
+        env:
+          LINUXDEPLOY_DIR: /opt/linuxdeploy
+          CMAKE_GENERATOR: Ninja
+        run: tools/make-appimage.sh dist
+      - name: Start
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          QT_QPA_PLATFORM: offscreen
+        run: dist/aslgc-*.AppImage --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: dist/aslgc-*.AppImage
+          if-no-files-found: error
+
+  flatpak:
+    name: Flatpak
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          # bubblewrap needs unprivileged user namespaces, which Ubuntu 24.04 restricts.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+      - name: Build
+        run: |
+          flatpak-builder --user --install-deps-from=flathub --disable-rofiles-fuse --force-clean \
+            --repo=build-flatpak/repo build-flatpak/app packaging/flatpak/io.github.kschouw91.aslgc.yml
+          flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo build-flatpak/repo \
+            "aslgc-${{ needs.version.outputs.version }}-x86_64.flatpak" io.github.kschouw91.aslgc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: aslgc-*.flatpak
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    if: github.ref_type == 'tag'
+    needs: [version, deb, rpm, appimage, flatpak]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Release notes
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          awk -v v="$VERSION" 'index($0, "## [" v "]") == 1 { on = 1; next } on && /^## \[/ { exit } on' \
+            CHANGELOG.md > notes.md
+          cat >> notes.md <<EOF
+
+          ### Downloads
+          - **Any distribution:** \`aslgc-$VERSION-x86_64.AppImage\` (needs glibc 2.39 or newer: Ubuntu 24.04,
+            Debian 13, Fedora 40 and later) or \`aslgc-$VERSION-x86_64.flatpak\`
+            (\`flatpak install --user aslgc-$VERSION-x86_64.flatpak\`; the runtime comes from Flathub)
+          - **Ubuntu 24.04 / Debian 13:** the matching \`.deb\` (\`sudo apt install ./aslgc_….deb\`)
+          - **Fedora:** the \`.rpm\` (\`sudo dnf install ./aslgc-….rpm\`)
+          - **Arch Linux:** \`packaging/arch/PKGBUILD\` (\`makepkg -si\`)
+          EOF
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          cd dist
+          sha256sum -- * > ../SHA256SUMS && mv ../SHA256SUMS .
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "aslgc $VERSION" --notes-file ../notes.md -- *

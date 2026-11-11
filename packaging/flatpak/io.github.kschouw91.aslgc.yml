@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: MIT
+# Flatpak manifest. It builds the source tree it lives in; a Flathub submission swaps the last
+# module's source for the release tag (type: git, tag, commit).
+#
+#   flatpak run org.flatpak.Builder --user --install --force-clean \
+#       build-flatpak packaging/flatpak/io.github.kschouw91.aslgc.yml
+id: io.github.kschouw91.aslgc
+runtime: org.kde.Platform
+runtime-version: '6.11'
+sdk: org.kde.Sdk
+command: aslgc
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Repositories can live anywhere: home, other drives, /srv, ...
+  - --filesystem=host
+  # Signed commits and SSH remotes use the user's agents.
+  - --socket=ssh-auth
+  - --socket=gpg-agent
+  # Account tokens in the system keyring (Secret Service, KWallet).
+  - --talk-name=org.freedesktop.secrets
+  - --talk-name=org.kde.kwalletd6
+  - --talk-name=org.kde.kwalletd5
+  # Open in Terminal and Open in Merge Tool start the user's own programs on the host.
+  - --talk-name=org.freedesktop.Flatpak
+cleanup:
+  - /include
+  - /lib/cmake
+  - /lib/pkgconfig
+  - /share/man
+  - '*.a'
+modules:
+  - name: qtkeychain
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_WITH_QT6=ON
+      - -DBUILD_TEST_APPLICATION=OFF
+      - -DBUILD_TRANSLATIONS=OFF
+    sources:
+      - type: git
+        url: https://github.com/frankosterfeld/qtkeychain.git
+        tag: 0.15.0
+        commit: ad7344c45a86a4f66cbafc4b081b5f7b876cb0b7
+
+  # The runtime has no git. Without Perl, Python and Tcl/Tk only their extras are missing
+  # (git send-email, git svn, gitk); everything aslgc runs is built in or a shell script.
+  # Rust stays optional until git 3.0.
+  - name: git
+    buildsystem: autotools
+    config-opts:
+      - --without-tcltk
+    make-args: [INSTALL_SYMLINKS=1, NO_PERL=1, NO_PYTHON=1, NO_GETTEXT=1, NO_RUST=1, USE_LIBPCRE2=1]
+    make-install-args: [INSTALL_SYMLINKS=1, NO_PERL=1, NO_PYTHON=1, NO_GETTEXT=1, NO_RUST=1, USE_LIBPCRE2=1]
+    cleanup:
+      - /share/git-gui
+      - /share/gitk
+      - /share/gitweb
+    sources:
+      - type: archive
+        url: https://mirrors.edge.kernel.org/pub/software/scm/git/git-2.56.1.tar.xz
+        sha256: f0b0bf89264b9bd2e1c640363e7529643989da76281600473c50745cd34a607f
+
+  - name: aslgc
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - build
+          - build-flatpak
+          - .flatpak-builder
+          - compile_commands.json
